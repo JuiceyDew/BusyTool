@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import type { DatabaseSync } from 'node:sqlite'
 import { CHANNELS, type Channel, type IpcMap } from '../shared/ipc'
 import { SCHEMAS } from '../shared/schemas'
@@ -12,6 +12,7 @@ import * as settings from './repo/settings'
 import { dashboardSummary } from './repo/dashboard'
 import { BLOCKED_MESSAGE, MISSING_BINARY_MESSAGE, fetchTikTokStats, resolveYtDlp } from './stats/tiktok'
 import { exportInvoicePdf } from './invoice-pdf'
+import { appImageInfo, checkForUpdate, downloadAndStage } from './updater/appimage'
 import { detectPlatform } from '../shared/platform'
 import type { ClientPayload, ExpensePayload, InvoiceCreatePayload, ProjectPayload, VideoPayload, VideoTypePayload } from '../shared/ipc'
 import type { Settings } from '../shared/types'
@@ -142,7 +143,38 @@ const handlers: { [K in Channel]: Handler<K> } = {
     await shell.openExternal(req.url)
     return null
   },
-  'app:dataPath': () => dataFilePath
+  'app:dataPath': () => dataFilePath,
+
+  'app:updateCheck': async () => {
+    const result = await checkForUpdate()
+    return {
+      status: result.status,
+      currentVersion: result.currentVersion,
+      version: result.update?.version,
+      notesUrl: result.update?.notesUrl ?? null,
+      size: result.update?.size ?? null,
+      message: result.message
+    }
+  },
+  'app:updateInstall': async () => {
+    const checked = await checkForUpdate()
+    if (!checked.update) {
+      return {
+        installed: false,
+        message: checked.message ?? 'BusyTool is already up to date.'
+      }
+    }
+    const result = await downloadAndStage(checked.update)
+    return { installed: result.installed, version: checked.update.version, message: result.message }
+  },
+  'app:updateInfo': async () => {
+    const info = await appImageInfo()
+    return {
+      appImagePath: info.path,
+      version: app.getVersion(),
+      canUpdate: info.path !== null
+    }
+  }
 }
 
 let registered = false

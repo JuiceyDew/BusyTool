@@ -65,6 +65,27 @@ export interface InvoiceCreatePayload {
   extraItems?: Array<{ description: string; amountCents: number }>
 }
 
+export interface UpdateEnvironment {
+  appImagePath: string | null
+  version: string
+  canUpdate: boolean
+}
+
+export interface UpdateCheckResponse {
+  status: 'current' | 'available' | 'unsupported' | 'error'
+  currentVersion: string
+  version?: string
+  notesUrl?: string | null
+  size?: number | null
+  message?: string
+}
+
+export interface UpdateInstallResponse {
+  installed: boolean
+  version?: string
+  message?: string
+}
+
 /** Single contract for every IPC channel: preload typing and ipcMain handlers must both match. */
 export interface IpcMap {
   'clients:list': { req: { q?: string; includeArchived?: boolean }; res: ClientRow[] }
@@ -123,6 +144,9 @@ export interface IpcMap {
 
   'app:openExternal': { req: { url: string }; res: null }
   'app:dataPath': { req: Record<string, never>; res: string }
+  'app:updateCheck': { req: Record<string, never>; res: UpdateCheckResponse }
+  'app:updateInstall': { req: Record<string, never>; res: UpdateInstallResponse }
+  'app:updateInfo': { req: Record<string, never>; res: UpdateEnvironment }
 }
 
 export type Channel = keyof IpcMap
@@ -166,5 +190,8 @@ export const CHANNELS: Channel[] = [
   'settings:update',
   'dashboard:summary',
   'app:openExternal',
-  'app:dataPath'
+  'app:dataPath',
+  'app:updateCheck',
+  'app:updateInstall',
+  'app:updateInfo'
 ]

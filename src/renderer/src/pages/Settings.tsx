@@ -7,6 +7,7 @@ import { Card, CardHeader } from '../components/ui/Card'
 import { Field, Input, Select, Textarea } from '../components/ui/Input'
 import { Loading, PageHeader } from '../components/ui/PageHeader'
 import { showError } from '../lib/toast'
+import type { UpdateCheckResponse, UpdateEnvironment } from '@shared/ipc'
 import type { Settings } from '@shared/types'
 
 export function SettingsPage() {
@@ -162,6 +163,8 @@ function SettingsForm({
           </div>
         </Card>
 
+        <UpdateCard />
+
         <Card>
           <CardHeader title="Video stats" />
           <div className="space-y-2 p-4 text-xs text-zinc-500">
@@ -171,5 +174,107 @@ function SettingsForm({
         </Card>
       </div>
     </div>
+  )
+}
+
+function UpdateCard() {
+  const [env, setEnv] = useState<UpdateEnvironment | null>(null)
+  const [result, setResult] = useState<UpdateCheckResponse | null>(null)
+  const [busy, setBusy] = useState<'check' | 'install' | null>(null)
+  const [installed, setInstalled] = useState<string | null>(null)
+
+  useEffect(() => {
+    call('app:updateInfo', {})
+      .then(setEnv)
+      .catch(() => undefined)
+  }, [])
+
+  const check = async (): Promise<void> => {
+    setBusy('check')
+    setInstalled(null)
+    try {
+      setResult(await call('app:updateCheck', {}))
+    } catch (err) {
+      showError(err instanceof Error ? err.message : 'Could not check for updates.')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const install = async (): Promise<void> => {
+    setBusy('install')
+    try {
+      const outcome = await call('app:updateInstall', {})
+      if (outcome.installed) {
+        setInstalled(outcome.version ?? null)
+        setResult(null)
+      } else if (outcome.message) {
+        showError(outcome.message)
+      }
+    } catch (err) {
+      showError(err instanceof Error ? err.message : 'Could not install the update.')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader
+        title="Updates"
+        subtitle={env ? `Version ${env.version}` : 'Version unknown'}
+      />
+      <div className="space-y-2 p-4 text-xs text-zinc-500">
+        {env && !env.canUpdate ? (
+          <p>Updates apply to the packaged AppImage. This build is run from source; use git to update.</p>
+        ) : (
+          <>
+            <p>The AppImage replaces itself with the latest GitHub release, verified by checksum.</p>
+            <p className="break-all font-mono text-[11px] text-zinc-400">{env?.appImagePath}</p>
+          </>
+        )}
+
+        {installed ? (
+          <p className="text-emerald-600">
+            Version {installed} installed. Quit and reopen BusyTool to use it.
+          </p>
+        ) : null}
+
+        {result?.status === 'current' ? <p>You are on the latest version.</p> : null}
+        {result?.status === 'available' && result.version ? (
+          <p className="text-zinc-700">
+            Version {result.version} is available (you have {result.currentVersion}).
+          </p>
+        ) : null}
+        {result?.message ? <p className="text-zinc-600">{result.message}</p> : null}
+
+        <div className="flex gap-2 pt-1">
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={check}
+            disabled={busy !== null || (env ? !env.canUpdate : false)}
+          >
+            {busy === 'check' ? <ButtonSpinner>Checking…</ButtonSpinner> : 'Check for updates'}
+          </Button>
+          {result?.status === 'available' ? (
+            <Button size="sm" variant="primary" onClick={install} disabled={busy !== null}>
+              {busy === 'install' ? <ButtonSpinner>Installing…</ButtonSpinner> : `Install ${result.version}`}
+            </Button>
+          ) : null}
+          {result?.notesUrl ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                if (result.notesUrl) void call('app:openExternal', { url: result.notesUrl })
+              }}
+            >
+              Release notes
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    </Card>
   )
 }

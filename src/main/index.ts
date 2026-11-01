@@ -1,9 +1,10 @@
-import { app, BrowserWindow, nativeImage } from 'electron'
+import { app, BrowserWindow, Menu, nativeImage, shell } from 'electron'
 import { join } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { openDatabase } from './db'
 import { databaseFile, resolveDataDir } from './dataDir'
 import { registerIpc } from './ipc'
+import { promptForUpdate } from './updater/appimage'
 
 app.setName('BusyTool')
 
@@ -32,6 +33,7 @@ if (!gotLock) {
       dataDir
     })
 
+    installMenu()
     mainWindow = createWindow()
     const window = mainWindow
     window.on('closed', () => {
@@ -56,6 +58,36 @@ app.on('window-all-closed', () => {
   db = null
   if (process.platform !== 'darwin') app.quit()
 })
+
+/** Default menu plus Help → Check for updates. */
+function installMenu(): void {
+  const isMac = process.platform === 'darwin'
+  const template: Electron.MenuItemConstructorOptions[] = [
+    ...(isMac ? [{ role: 'appMenu' as const }] : []),
+    { role: 'fileMenu' },
+    { role: 'editMenu' },
+    { role: 'viewMenu' },
+    { role: 'windowMenu' },
+    {
+      role: 'help',
+      submenu: [
+        {
+          label: 'Check for updates…',
+          click: () => {
+            void promptForUpdate(mainWindow)
+          }
+        },
+        {
+          label: 'Open data folder',
+          click: () => {
+            void shell.openPath(app.getPath('userData'))
+          }
+        }
+      ]
+    }
+  ]
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+}
 
 function createWindow(): BrowserWindow {
   const iconPath = join(__dirname, '../../build/icon.png')

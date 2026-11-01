@@ -137,5 +137,8 @@ export const SCHEMAS: Record<Channel, z.ZodType> = {
   'dashboard:summary': empty,
 
   'app:openExternal': z.object({ url: z.string().url().refine((u) => u.startsWith('https://'), 'Only https links can be opened') }),
-  'app:dataPath': empty
+  'app:dataPath': empty,
+  'app:updateCheck': empty,
+  'app:updateInstall': empty,
+  'app:updateInfo': empty
 }
