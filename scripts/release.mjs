@@ -60,10 +60,23 @@ if (!new RegExp(`^version:\\s*${next.replace(/\./g, '\\.')}$`, 'm').test(manifes
 }
 
 // Verified build: commit the version bump, tag it, and publish.
-run('git', ['add', 'package.json'])
-run('git', ['commit', '-m', `${tag}: release`])
-run('git', ['tag', '-a', tag, '-m', `BusyTool ${next}`])
-run('git', ['push', 'origin', 'HEAD', '--follow-tags'])
-run('gh', ['release', 'create', tag, appImage, manifest, '--title', `BusyTool ${next}`, '--generate-notes'])
+// A git identity is required for the tag commit; fall back to a project-local one.
+const identity = []
+if (git(['config', 'user.email']) === '') identity.push('-c', 'user.email=dev@busytool.local')
+if (git(['config', 'user.name']) === '') identity.push('-c', 'user.name=BusyTool')
+
+try {
+  run('git', ['add', 'package.json'])
+  run('git', [...identity, 'commit', '-m', `${tag}: release`])
+  run('git', [...identity, 'tag', '-a', tag, '-m', `BusyTool ${next}`])
+  run('git', ['push', 'origin', 'HEAD', '--follow-tags'])
+  run('gh', ['release', 'create', tag, appImage, manifest, '--title', `BusyTool ${next}`, '--generate-notes'])
+} catch (err) {
+  abort(
+    `Publishing failed after the build. The version bump was reverted; release ${tag} is not published.\n${
+      err instanceof Error ? err.message : String(err)
+    }`
+  )
+}
 
 console.log(`\nReleased ${tag}. Installed copies will offer it in Settings → Updates.`)
