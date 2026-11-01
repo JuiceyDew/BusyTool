@@ -20,6 +20,14 @@ const bump = (version, kind) => {
 
 const run = (command, args) => execFileSync(command, args, { cwd: root, stdio: 'inherit' })
 const git = (args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim()
+/** Read a git value that legitimately exits 1 when unset. */
+const gitMaybe = (args) => {
+  try {
+    return git(args)
+  } catch {
+    return ''
+  }
+}
 
 const argument = process.argv[2] ?? 'patch'
 const originalText = readFileSync(pkgPath, 'utf8')
@@ -62,8 +70,8 @@ if (!new RegExp(`^version:\\s*${next.replace(/\./g, '\\.')}$`, 'm').test(manifes
 // Verified build: commit the version bump, tag it, and publish.
 // A git identity is required for the tag commit; fall back to a project-local one.
 const identity = []
-if (git(['config', 'user.email']) === '') identity.push('-c', 'user.email=dev@busytool.local')
-if (git(['config', 'user.name']) === '') identity.push('-c', 'user.name=BusyTool')
+if (gitMaybe(['config', 'user.email']) === '') identity.push('-c', 'user.email=dev@busytool.local')
+if (gitMaybe(['config', 'user.name']) === '') identity.push('-c', 'user.name=BusyTool')
 
 try {
   run('git', ['add', 'package.json'])
