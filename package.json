@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "fetch:ytdlp": "node scripts/fetch-ytdlp.mjs",
-    "dist": "node scripts/fetch-ytdlp.mjs && electron-vite build && electron-builder --linux AppImage --publish never"
+    "dist": "node scripts/fetch-ytdlp.mjs && electron-vite build && electron-builder --linux AppImage --publish never",
+    "release": "node scripts/release.mjs"
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.3.3",

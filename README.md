@@ -28,6 +28,22 @@ Run it:
 APPIMAGE_EXTRACT_AND_RUN=1 ./release/BusyTool-0.1.0.AppImage   # needed when only libfuse3 is installed
 ```
 
+## Releasing an update
+
+```bash
+npm run release -- patch     # or minor / major / an explicit 1.2.3
+```
+
+That bumps `package.json`, rebuilds the AppImage, tags `vX.Y.Z`, pushes, and creates a GitHub
+release carrying `BusyTool-X.Y.Z.AppImage` plus electron-builder's `latest-linux.yml` (the sha512
+manifest). Installed copies pick it up from **Settings → Updates** or **Help → Check for updates…**:
+the app downloads the asset, verifies it against the published sha512, and atomically replaces its
+own file — quit and reopen to run the new version. A missing or mismatched checksum refuses to
+install.
+
+Updating needs the packaged AppImage; when run from source the button reports that updates are
+managed by git. `BUSYTOOL_UPDATE_API` overrides the release-API URL for local testing.
+
 ## Checks
 
 ```bash
