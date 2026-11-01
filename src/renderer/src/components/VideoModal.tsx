@@ -63,6 +63,8 @@ export function VideoModal({
   }, [clientId])
 
   const platform = detectPlatform(url)
+  // A billed video's price is frozen: invoice items are snapshots of what was billed.
+  const lockedOnInvoice = video?.invoiceId != null
 
   const chooseType = (value: number | null): void => {
     setVideoTypeId(value)
@@ -178,10 +180,20 @@ export function VideoModal({
               ))}
             </Select>
           </Field>
-          <Field label={`Price (${currency})`} hint={videoTypeId ? 'Prefilled from the type; editable.' : undefined}>
+          <Field
+            label={`Price (${currency})`}
+            hint={
+              lockedOnInvoice
+                ? `On ${video.invoiceNumber ?? 'an invoice'} (draft) — delete the draft to change the price`
+                : videoTypeId
+                  ? 'Prefilled from the type; editable.'
+                  : undefined
+            }
+          >
             <Input
               value={price}
               inputMode="decimal"
+              disabled={lockedOnInvoice}
               onChange={(event) => {
                 setPriceTouched(true)
                 clearOnEdit(setPrice)(event.target.value)

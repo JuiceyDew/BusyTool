@@ -37,15 +37,20 @@ export function ProjectModal({
   const [status, setStatus] = useState<ProjectStatus>(project?.status ?? 'open')
   const { error, setError, clearOnEdit: edit } = useFormError()
   const [pending, setPending] = useState(false)
+  const [videoCount, setVideoCount] = useState(project?.videoCount ?? 0)
   const [videoTotal, setVideoTotal] = useState(project?.videoTotalCents ?? 0)
+
+  // A project's amount covers non-video work only: when it holds videos, the fee starts at zero.
+  const lockedOnInvoice = project?.invoiceId != null
 
   useEffect(() => {
     if (!project) return
     setClientId(project.clientId)
     setTitle(project.title)
     setDescription(project.description)
-    setAmount(centsToInput(project.amountCents))
+    setAmount(project.videoCount > 0 && project.amountCents === 0 ? '0.00' : centsToInput(project.amountCents))
     setStatus(project.status)
+    setVideoCount(project.videoCount)
     setVideoTotal(project.videoTotalCents)
   }, [project])
 
@@ -55,6 +60,7 @@ export function ProjectModal({
     call('videos:list', { projectId: project.id })
       .then((videos) => {
         if (!alive) return
+        setVideoCount(videos.length)
         setVideoTotal(videos.reduce((sum, video) => sum + video.priceCents, 0))
       })
       .catch(() => undefined)
@@ -62,6 +68,16 @@ export function ProjectModal({
       alive = false
     }
   }, [project, open])
+
+  const typedCents = parseAmountToCents(amount) ?? 0
+  const amountHint = lockedOnInvoice
+    ? `On ${project?.invoiceNumber ?? 'an invoice'} (draft) — delete the draft to change the price`
+    : videoCount > 0 && typedCents > 0
+      ? `Videos bill separately (${formatCents(videoTotal, currency)} across ${videoCount}). ` +
+        `Projects and videos are both billed; the total is ${formatCents(typedCents + videoTotal, currency)}.`
+      : videoCount > 0
+        ? `Videos bill separately (${formatCents(videoTotal, currency)} across ${videoCount}).`
+        : 'The price you bill the client for this project.'
 
   const submit = async (): Promise<void> => {
     if (!clientId) {
@@ -143,31 +159,14 @@ export function ProjectModal({
         <Field label="Title" error={error && !title.trim() ? 'Title is required' : null}>
           <Input value={title} autoFocus onChange={(event) => edit(setTitle)(event.target.value)} />
         </Field>
-        <Field
-          label={`Amount (${currency})`}
-          hint={
-            videoTotal > 0
-              ? `Videos on this project total ${formatCents(videoTotal, currency)}.`
-              : 'The price you bill the client for this project.'
-          }
-        >
-          <div className="flex gap-2">
-            <Input
-              value={amount}
-              inputMode="decimal"
-              placeholder="0.00"
-              onChange={(event) => edit(setAmount)(event.target.value)}
-            />
-            {videoTotal > 0 ? (
-              <Button
-                variant="secondary"
-                className="shrink-0"
-                onClick={() => setAmount(centsToInput(videoTotal))}
-              >
-                Use {formatCents(videoTotal, currency)}
-              </Button>
-            ) : null}
-          </div>
+        <Field label={`Amount (${currency})`} hint={amountHint}>
+          <Input
+            value={amount}
+            inputMode="decimal"
+            placeholder="0.00"
+            disabled={lockedOnInvoice || pending}
+            onChange={(event) => edit(setAmount)(event.target.value)}
+          />
         </Field>
         <Field label="Description">
           <Textarea value={description} onChange={(event) => setDescription(event.target.value)} />

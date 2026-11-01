@@ -70,7 +70,7 @@ export function ProjectsPage() {
     <div>
       <PageHeader
         title="Projects"
-        description="Priced work per client. Paid projects and paid invoices make up your income."
+        description="Priced work per client. Videos on a project bill separately, at their own price."
         actions={
           <Button
             variant="primary"

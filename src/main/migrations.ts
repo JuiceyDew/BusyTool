@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 2
 
 const DDL = `
 CREATE TABLE settings (
@@ -49,7 +49,10 @@ CREATE TABLE videos (
   url TEXT NOT NULL DEFAULT '',
   price_cents INTEGER NOT NULL DEFAULT 0 CHECK (price_cents >= 0),
   status TEXT NOT NULL DEFAULT 'todo' CHECK (status IN ('todo','in_progress','delivered','published')),
-  published_at TEXT, created_at TEXT NOT NULL
+  published_at TEXT,
+  paid_at TEXT,
+  invoice_id INTEGER REFERENCES invoices(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL
 );
 CREATE TABLE video_stats (
   id INTEGER PRIMARY KEY, video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
@@ -62,7 +65,9 @@ CREATE TABLE invoice_items (
   id INTEGER PRIMARY KEY, invoice_id INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
   description TEXT NOT NULL, amount_cents INTEGER NOT NULL,
   project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
-  sort INTEGER NOT NULL DEFAULT 0
+  video_id INTEGER REFERENCES videos(id) ON DELETE SET NULL,
+  sort INTEGER NOT NULL DEFAULT 0,
+  CHECK (project_id IS NULL OR video_id IS NULL)
 );
 CREATE TABLE expenses (
   id INTEGER PRIMARY KEY, date TEXT NOT NULL, label TEXT NOT NULL,
@@ -78,9 +83,22 @@ CREATE INDEX idx_projects_client ON projects(client_id);
 CREATE INDEX idx_projects_invoice ON projects(invoice_id);
 CREATE INDEX idx_videos_client ON videos(client_id);
 CREATE INDEX idx_videos_project ON videos(project_id);
+CREATE INDEX idx_videos_invoice ON videos(invoice_id);
 CREATE INDEX idx_video_stats_video ON video_stats(video_id, captured_at);
 CREATE INDEX idx_invoice_items_invoice ON invoice_items(invoice_id);
 CREATE INDEX idx_invoices_client ON invoices(client_id);
+`
+
+/**
+ * v2: a video is its own billable item — it can be paid directly or sit on an invoice,
+ * exactly like a project. invoice_items.video_id points back at the source video.
+ * (SQLite cannot add a CHECK constraint by ALTER TABLE; the repo keeps one source per line.)
+ */
+const MIGRATION_V2 = `
+ALTER TABLE videos ADD COLUMN paid_at TEXT;
+ALTER TABLE videos ADD COLUMN invoice_id INTEGER REFERENCES invoices(id) ON DELETE SET NULL;
+ALTER TABLE invoice_items ADD COLUMN video_id INTEGER REFERENCES videos(id) ON DELETE SET NULL;
+CREATE INDEX idx_videos_invoice ON videos(invoice_id);
 `
 
 export function readUserVersion(db: DatabaseSync): number {
@@ -96,11 +114,14 @@ export function migrate(db: DatabaseSync): void {
 
   db.exec('BEGIN')
   try {
+    // v1 creates the whole schema as it stands now (including the v2 columns), because the only
+    // v1 databases in the wild are older builds that predate video billing.
     if (version < 1) {
       db.exec(DDL)
       db.exec('INSERT OR IGNORE INTO settings(id) VALUES (1)')
-      db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`)
     }
+    if (version >= 1 && version < 2) db.exec(MIGRATION_V2)
+    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`)
     db.exec('COMMIT')
   } catch (err) {
     db.exec('ROLLBACK')

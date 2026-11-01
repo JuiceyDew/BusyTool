@@ -75,7 +75,7 @@ export function InvoiceDetailPage() {
   if (!state.data) return <p className="text-sm text-red-600">{state.error ?? 'Invoice not found.'}</p>
   if (!state.data.detail) return <p className="text-sm text-zinc-500">Invoice not found.</p>
 
-  const { invoice, items, projects } = state.data.detail
+  const { invoice, items, projects, videos } = state.data.detail
   const total = items.reduce((sum, item) => sum + item.amountCents, 0)
 
   return (
@@ -105,6 +105,11 @@ export function InvoiceDetailPage() {
             <Button disabled={pending !== null} onClick={exportPdf}>
               {pending === 'pdf' ? <ButtonSpinner>Exporting…</ButtonSpinner> : 'Export PDF'}
             </Button>
+            {invoice.status !== 'draft' ? (
+              <Button disabled={pending !== null} onClick={() => setStatus('draft')}>
+                {pending === 'draft' ? <ButtonSpinner>Reverting…</ButtonSpinner> : 'Back to draft'}
+              </Button>
+            ) : null}
             {invoice.status === 'draft' ? (
               <Button disabled={pending !== null} onClick={() => setEditOpen(true)}>
                 Edit
@@ -126,6 +131,7 @@ export function InvoiceDetailPage() {
             <thead>
               <tr>
                 <Th>Description</Th>
+                <Th>Kind</Th>
                 <Th className="text-right">Amount</Th>
               </tr>
             </thead>
@@ -133,11 +139,17 @@ export function InvoiceDetailPage() {
               {items.map((item) => (
                 <Tr key={item.id}>
                   <Td>{item.description}</Td>
+                  <Td>
+                    <Badge tone={item.kind === 'project' ? 'blue' : item.kind === 'video' ? 'zinc' : 'zinc'}>
+                      {item.kind}
+                    </Badge>
+                  </Td>
                   <Td className="text-right tabular-nums">{money(item.amountCents)}</Td>
                 </Tr>
               ))}
               <tr>
                 <Td className="font-medium">Total</Td>
+                <Td />
                 <Td className="text-right font-semibold tabular-nums">{money(total)}</Td>
               </tr>
             </tbody>
@@ -172,9 +184,17 @@ export function InvoiceDetailPage() {
           <Card className="p-4">
             <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Bill to</p>
             <p className="mt-2 text-sm font-medium">{invoice.clientName}</p>
-            {projects.length > 0 ? (
+            {projects.length > 0 || videos.length > 0 ? (
               <p className="mt-1 text-xs text-zinc-500">
-                {projects.length} project{projects.length === 1 ? '' : 's'} on this invoice
+                {[
+                  projects.length > 0
+                    ? `${projects.length} project${projects.length === 1 ? '' : 's'}`
+                    : null,
+                  videos.length > 0 ? `${videos.length} video${videos.length === 1 ? '' : 's'}` : null
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}{' '}
+                on this invoice
               </p>
             ) : null}
           </Card>

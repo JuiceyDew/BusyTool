@@ -56,6 +56,15 @@ export function ClientDetailPage() {
     }
   }
 
+  const toggleVideoPaid = async (video: VideoRow): Promise<void> => {
+    try {
+      await call('videos:setPaid', { id: video.id, paid: video.payment !== 'paid' })
+      state.reload()
+    } catch (err) {
+      showError(err instanceof Error ? err.message : 'Could not update the video.')
+    }
+  }
+
   const archive = async (): Promise<void> => {
     try {
       await call('clients:setArchived', { id: client.id, archived: client.archived === 0 })
@@ -92,6 +101,14 @@ export function ClientDetailPage() {
         description={[client.company, client.email, client.phone].filter(Boolean).join(' · ') || undefined}
         actions={
           <>
+            {client.unpaidItemCount > 0 ? (
+              <Button
+                variant="primary"
+                onClick={() => navigate(`/invoices/new?clientId=${client.id}`)}
+              >
+                Invoice {client.unpaidItemCount} unpaid item{client.unpaidItemCount === 1 ? '' : 's'}
+              </Button>
+            ) : null}
             <Button onClick={() => setEditing(true)}>Edit</Button>
             <Button onClick={archive}>{client.archived ? 'Restore' : 'Archive'}</Button>
             <ConfirmButton onConfirm={remove} size="md" />
@@ -174,7 +191,7 @@ export function ClientDetailPage() {
         </Card>
 
         <Card>
-          <CardHeader title="Videos" subtitle="Registered deliverables and their latest stats." />
+          <CardHeader title="Videos" subtitle="Each video bills at its own price. Stats come from TikTok or by hand." />
           {videos.length === 0 ? (
             <p className="px-4 py-6 text-sm text-zinc-500">No videos for this client yet.</p>
           ) : (
@@ -182,21 +199,50 @@ export function ClientDetailPage() {
               <thead>
                 <tr>
                   <Th>Title</Th>
-                  <Th>Platform</Th>
                   <Th className="text-right">Price</Th>
+                  <Th>Payment</Th>
                   <Th>Latest stats</Th>
+                  <Th className="text-right">Actions</Th>
                 </tr>
               </thead>
               <tbody>
                 {videos.map((video) => (
                   <Tr key={video.id}>
-                    <Td className="font-medium">{video.title || 'Untitled video'}</Td>
-                    <Td className="capitalize text-zinc-500">{video.platform}</Td>
+                    <Td className="font-medium">
+                      {video.title || 'Untitled video'}
+                      <span className="ml-1.5 text-xs text-zinc-400">{video.videoTypeName ?? video.platform}</span>
+                    </Td>
                     <Td className="text-right tabular-nums">{money(video.priceCents)}</Td>
+                    <Td>
+                      <Badge
+                        tone={
+                          video.payment === 'paid' ? 'green' : video.payment === 'invoiced' ? 'amber' : 'zinc'
+                        }
+                      >
+                        {video.payment}
+                      </Badge>
+                    </Td>
                     <Td className="text-xs text-zinc-500">
                       {video.latestStats
                         ? `${video.latestStats.views.toLocaleString('en-US')} views · ${video.latestStats.likes.toLocaleString('en-US')} likes`
                         : '—'}
+                    </Td>
+                    <Td>
+                      <div className="flex justify-end gap-1.5">
+                        {video.payment === 'invoiced' ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => video.invoiceId && navigate(`/invoices/${video.invoiceId}`)}
+                          >
+                            {video.invoiceNumber ?? 'Invoice'}
+                          </Button>
+                        ) : (
+                          <Button size="sm" variant="ghost" onClick={() => toggleVideoPaid(video)}>
+                            {video.payment === 'paid' ? 'Mark unpaid' : 'Mark paid'}
+                          </Button>
+                        )}
+                      </div>
                     </Td>
                   </Tr>
                 ))}

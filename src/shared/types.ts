@@ -30,6 +30,8 @@ export interface ClientDetail extends ClientRow {
   outstandingCents: number
   projectCount: number
   videoCount: number
+  /** Unpaid and not on an invoice: what "Invoice N unpaid items" offers to bill. */
+  unpaidItemCount: number
 }
 
 export interface VideoTypeRow {
@@ -82,7 +84,11 @@ export interface VideoRow {
   priceCents: number
   status: VideoStatus
   publishedAt: string | null
+  paidAt: string | null
+  invoiceId: number | null
+  invoiceNumber: string | null
   createdAt: string
+  payment: Payment
   latestStats: VideoStats | null
   statsCount: number
 }
@@ -93,6 +99,8 @@ export interface InvoiceItem {
   description: string
   amountCents: number
   projectId: number | null
+  videoId: number | null
+  kind: 'project' | 'video' | 'line'
   sort: number
 }
 
@@ -111,12 +119,14 @@ export interface InvoiceRow {
   createdAt: string
   totalCents: number
   projectCount: number
+  videoCount: number
 }
 
 export interface InvoiceDetail {
   invoice: InvoiceRow
   items: InvoiceItem[]
   projects: ProjectRow[]
+  videos: VideoRow[]
 }
 
 export interface ExpenseRow {
@@ -135,12 +145,28 @@ export interface DashboardSummary {
   expensesCents: number
   grossProfitCents: number
   outstandingCents: number
+  outstandingProjectsCents: number
+  outstandingVideosCents: number
+  outstandingInvoicesCents: number
   incomeThisMonthCents: number
   paidProjectCount: number
   unpaidProjectCount: number
+  paidVideoCount: number
+  unpaidVideoCount: number
   draftInvoiceCount: number
   expenseTotalCount: number
   clientCount: number
+}
+
+/** One row of the dashboard's "waiting to be paid" list: an unpaid, not-yet-invoiced billable. */
+export interface UnpaidQueueRow {
+  id: number
+  kind: 'project' | 'video'
+  clientId: number
+  clientName: string
+  title: string
+  amountCents: number
+  createdAt: string
 }
 
 export interface FetchStatsResult {

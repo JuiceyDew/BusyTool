@@ -1,9 +1,10 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { tx } from '../db'
 import { addDaysISO, nowTimestamp, todayISO } from '../../shared/date'
-import type { InvoiceDetail, InvoiceItem, InvoiceRow, InvoiceStatus, ProjectRow } from '../../shared/types'
-import { nullableStr, num, oneOf, str, type Row } from '../rows'
+import type { InvoiceDetail, InvoiceItem, InvoiceRow, InvoiceStatus, ProjectRow, VideoRow } from '../../shared/types'
+import { nullableNum, nullableStr, num, oneOf, str, type Row } from '../rows'
 import { getProject } from './projects'
+import { getVideo } from './videos'
 
 export interface ExtraItemInput {
   description: string
@@ -13,6 +14,7 @@ export interface ExtraItemInput {
 export interface CreateInvoiceInput {
   clientId: number
   projectIds: number[]
+  videoIds?: number[]
   dueDate?: string
   notes?: string
   extraItems?: ExtraItemInput[]
@@ -29,7 +31,8 @@ const COLUMNS = `i.id, i.number, i.year, i.seq, i.client_id AS clientId, c.name 
   i.issue_date AS issueDate, i.due_date AS dueDate, i.paid_at AS paidAt, i.notes,
   i.created_at AS createdAt,
   (SELECT COALESCE(SUM(amount_cents), 0) FROM invoice_items it WHERE it.invoice_id = i.id) AS totalCents,
-  (SELECT COUNT(*) FROM invoice_items it WHERE it.invoice_id = i.id AND it.project_id IS NOT NULL) AS projectCount`
+  (SELECT COUNT(*) FROM invoice_items it WHERE it.invoice_id = i.id AND it.project_id IS NOT NULL) AS projectCount,
+  (SELECT COUNT(*) FROM invoice_items it WHERE it.invoice_id = i.id AND it.video_id IS NOT NULL) AS videoCount`
 
 function mapInvoice(row: Row): InvoiceRow {
   return {
@@ -46,7 +49,8 @@ function mapInvoice(row: Row): InvoiceRow {
     notes: str(row.notes),
     createdAt: str(row.createdAt),
     totalCents: num(row.totalCents),
-    projectCount: num(row.projectCount)
+    projectCount: num(row.projectCount),
+    videoCount: num(row.videoCount)
   }
 }
 
@@ -82,28 +86,40 @@ function readItems(db: DatabaseSync, invoiceId: number): InvoiceItem[] {
   return db
     .prepare(
       `SELECT id, invoice_id AS invoiceId, description, amount_cents AS amountCents,
-              project_id AS projectId, sort
+              project_id AS projectId, video_id AS videoId, sort
        FROM invoice_items WHERE invoice_id = ? ORDER BY sort ASC, id ASC`
     )
     .all(invoiceId)
-    .map((row) => ({
-      id: num(row.id),
-      invoiceId: num(row.invoiceId),
-      description: str(row.description),
-      amountCents: num(row.amountCents),
-      projectId: row.projectId === null || row.projectId === undefined ? null : num(row.projectId),
-      sort: num(row.sort)
-    }))
+    .map((row): InvoiceItem => {
+      const projectId = nullableNum(row.projectId)
+      const videoId = nullableNum(row.videoId)
+      return {
+        id: num(row.id),
+        invoiceId: num(row.invoiceId),
+        description: str(row.description),
+        amountCents: num(row.amountCents),
+        projectId,
+        videoId,
+        kind: projectId !== null ? 'project' : videoId !== null ? 'video' : 'line',
+        sort: num(row.sort)
+      }
+    })
 }
 
 function linkedProjects(db: DatabaseSync, invoiceId: number): ProjectRow[] {
-  const ids = db
+  return db
     .prepare('SELECT id FROM projects WHERE invoice_id = ? ORDER BY id ASC')
     .all(invoiceId)
-    .map((row) => num(row.id))
-  return ids
-    .map((id) => getProject(db, id))
+    .map((row) => getProject(db, num(row.id)))
     .filter((project): project is ProjectRow => project !== null)
+}
+
+function linkedVideos(db: DatabaseSync, invoiceId: number): VideoRow[] {
+  return db
+    .prepare('SELECT id FROM videos WHERE invoice_id = ? ORDER BY id ASC')
+    .all(invoiceId)
+    .map((row) => getVideo(db, num(row.id)))
+    .filter((video): video is VideoRow => video !== null)
 }
 
 export function getInvoice(db: DatabaseSync, id: number): InvoiceDetail | null {
@@ -114,7 +130,8 @@ export function getInvoice(db: DatabaseSync, id: number): InvoiceDetail | null {
   return {
     invoice: mapInvoice(row),
     items: readItems(db, id),
-    projects: linkedProjects(db, id)
+    projects: linkedProjects(db, id),
+    videos: linkedVideos(db, id)
   }
 }
 
@@ -132,6 +149,17 @@ export function nextNumberPreview(db: DatabaseSync, today = todayISO()): string 
   return `${prefix}-${year}-${String(nextSeq).padStart(3, '0')}`
 }
 
+/** Videos read as "Video #<id>" when they have no title yet (TikTok fetch can fill it later). */
+function videoLabel(video: VideoRow): string {
+  return video.title.trim() || `Video #${video.id}`
+}
+
+/** "<type> — <title>" when a price-list type is set, else the title alone. */
+function videoItemDescription(video: VideoRow): string {
+  const label = videoLabel(video)
+  return video.videoTypeName ? `${video.videoTypeName} — ${label}` : label
+}
+
 export function createInvoice(
   db: DatabaseSync,
   input: CreateInvoiceInput,
@@ -139,18 +167,21 @@ export function createInvoice(
 ): InvoiceDetail {
   const today = opts.today ?? todayISO()
   const year = Number(today.slice(0, 4))
+  const projectIds = input.projectIds ?? []
+  const videoIds = input.videoIds ?? []
+  const extraItems = input.extraItems ?? []
 
   return tx(db, () => {
     const { prefix, termsDays } = settingsRow(db)
     const client = db.prepare('SELECT id FROM clients WHERE id = ?').get(input.clientId)
     if (!client) throw new Error('Client not found.')
 
-    if (input.projectIds.length === 0 && (input.extraItems ?? []).length === 0) {
-      throw new Error('Add at least one project or line item.')
+    if (projectIds.length === 0 && videoIds.length === 0 && extraItems.length === 0) {
+      throw new Error('Add at least one project or video to the invoice.')
     }
 
     const projects: ProjectRow[] = []
-    for (const projectId of input.projectIds) {
+    for (const projectId of projectIds) {
       const project = getProject(db, projectId)
       if (!project) throw new Error('Project not found.')
       if (project.clientId !== input.clientId) {
@@ -163,6 +194,22 @@ export function createInvoice(
         throw new Error(`Project "${project.title}" is already paid.`)
       }
       projects.push(project)
+    }
+
+    const videos: VideoRow[] = []
+    for (const videoId of videoIds) {
+      const video = getVideo(db, videoId)
+      if (!video) throw new Error('Video not found.')
+      if (video.clientId !== input.clientId) {
+        throw new Error(`Video "${videoLabel(video)}" belongs to another client.`)
+      }
+      if (video.invoiceId !== null) {
+        throw new Error(`Video "${videoLabel(video)}" is already on an invoice.`)
+      }
+      if (video.paidAt !== null) {
+        throw new Error(`Video "${videoLabel(video)}" is already paid.`)
+      }
+      videos.push(video)
     }
 
     const seq = maxIssuedSeq(db, year) + 1
@@ -181,21 +228,26 @@ export function createInvoice(
       .run(number, year, seq, input.clientId, today, dueDate, input.notes ?? '', nowTimestamp())
     const invoiceId = Number(inserted.lastInsertRowid)
 
+    // Items are snapshots of the price at billing time; the CHECK keeps one source per line.
     const insertItem = db.prepare(
-      `INSERT INTO invoice_items(invoice_id, description, amount_cents, project_id, sort)
-       VALUES (?, ?, ?, ?, ?)`
+      `INSERT INTO invoice_items(invoice_id, description, amount_cents, project_id, video_id, sort)
+       VALUES (?, ?, ?, ?, ?, ?)`
     )
     let sort = 0
     for (const project of projects) {
-      insertItem.run(invoiceId, project.title, project.amountCents, project.id, sort++)
+      insertItem.run(invoiceId, project.title, project.amountCents, project.id, null, sort++)
     }
-    for (const extra of input.extraItems ?? []) {
-      insertItem.run(invoiceId, extra.description.trim(), extra.amountCents, null, sort++)
+    for (const video of videos) {
+      insertItem.run(invoiceId, videoItemDescription(video), video.priceCents, null, video.id, sort++)
     }
-    if (projects.length > 0) {
-      const link = db.prepare('UPDATE projects SET invoice_id = ? WHERE id = ?')
-      for (const project of projects) link.run(invoiceId, project.id)
+    for (const extra of extraItems) {
+      insertItem.run(invoiceId, extra.description.trim(), extra.amountCents, null, null, sort++)
     }
+
+    const linkProject = db.prepare('UPDATE projects SET invoice_id = ? WHERE id = ?')
+    for (const project of projects) linkProject.run(invoiceId, project.id)
+    const linkVideo = db.prepare('UPDATE videos SET invoice_id = ? WHERE id = ?')
+    for (const video of videos) linkVideo.run(invoiceId, video.id)
 
     const created = getInvoice(db, invoiceId)
     if (!created) throw new Error('Invoice could not be created.')
@@ -240,7 +292,8 @@ export function setInvoiceStatus(
     } else if (status === 'sent') {
       db.prepare("UPDATE invoices SET status = 'sent', paid_at = NULL WHERE id = ?").run(id)
     } else {
-      if (current.invoice.status !== 'sent') throw new Error('Only sent invoices can return to draft.')
+      // Back to draft keeps the items and the billable links, so a mistaken paid invoice can be
+      // corrected and then deleted.
       db.prepare("UPDATE invoices SET status = 'draft', paid_at = NULL WHERE id = ?").run(id)
     }
 
@@ -255,9 +308,9 @@ export function deleteInvoice(db: DatabaseSync, id: number): void {
     const current = getInvoice(db, id)
     if (!current) throw new Error('Invoice not found.')
     if (current.invoice.status !== 'draft') {
-      throw new Error('Only draft invoices can be deleted; mark it unpaid/void by recreating instead.')
+      throw new Error('Only draft invoices can be deleted; set it back to draft first.')
     }
-    // invoice_items cascade; projects.invoice_id is ON DELETE SET NULL.
+    // invoice_items cascade; projects.invoice_id and videos.invoice_id are ON DELETE SET NULL.
     db.prepare('DELETE FROM invoices WHERE id = ?').run(id)
   })
 }

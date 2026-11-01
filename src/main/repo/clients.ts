@@ -3,6 +3,12 @@ import { tx } from '../db'
 import { nowTimestamp } from '../../shared/date'
 import type { ClientDetail, ClientRow } from '../../shared/types'
 import { boolInt, num, str, type Row } from '../rows'
+import {
+  outstandingInvoicesCents,
+  outstandingProjectsCents,
+  outstandingVideosCents,
+  paidIncomeCents
+} from './money-queries'
 
 export interface ClientInput {
   name: string
@@ -54,43 +60,24 @@ export function getClient(db: DatabaseSync, id: number): ClientDetail | null {
   const base = db.prepare(`SELECT ${CLIENT_COLUMNS} FROM clients WHERE id = ?`).get(id)
   if (!base) return null
 
-  // Income = paid invoice item totals + directly-paid projects (no overlap: invoiced projects
-  // always have invoice_id set, so the first term excludes them).
-  const paidInvoices = scalar(
-    db,
-    `SELECT COALESCE(SUM(x.total), 0) FROM (
-       SELECT invoice_id, SUM(amount_cents) AS total FROM invoice_items GROUP BY invoice_id
-     ) x JOIN invoices i ON i.id = x.invoice_id
-     WHERE i.client_id = ? AND i.status = 'paid'`,
-    id
-  )
-  const paidProjects = scalar(
-    db,
-    `SELECT COALESCE(SUM(amount_cents), 0) FROM projects
-     WHERE client_id = ? AND paid_at IS NOT NULL AND invoice_id IS NULL`,
-    id
-  )
-  const outstandingProjects = scalar(
-    db,
-    `SELECT COALESCE(SUM(amount_cents), 0) FROM projects
-     WHERE client_id = ? AND paid_at IS NULL AND invoice_id IS NULL`,
-    id
-  )
-  const outstandingInvoices = scalar(
-    db,
-    `SELECT COALESCE(SUM(x.total), 0) FROM (
-       SELECT invoice_id, SUM(amount_cents) AS total FROM invoice_items GROUP BY invoice_id
-     ) x JOIN invoices i ON i.id = x.invoice_id
-     WHERE i.client_id = ? AND i.status IN ('draft','sent')`,
-    id
-  )
-
   return {
     ...mapClient(base),
-    paidIncomeCents: paidInvoices + paidProjects,
-    outstandingCents: outstandingProjects + outstandingInvoices,
+    paidIncomeCents: paidIncomeCents(db, id),
+    outstandingCents:
+      outstandingProjectsCents(db, id) + outstandingVideosCents(db, id) + outstandingInvoicesCents(db, id),
     projectCount: scalar(db, 'SELECT COUNT(*) FROM projects WHERE client_id = ?', id),
-    videoCount: scalar(db, 'SELECT COUNT(*) FROM videos WHERE client_id = ?', id)
+    videoCount: scalar(db, 'SELECT COUNT(*) FROM videos WHERE client_id = ?', id),
+    unpaidItemCount:
+      scalar(
+        db,
+        'SELECT COUNT(*) FROM projects WHERE client_id = ? AND paid_at IS NULL AND invoice_id IS NULL',
+        id
+      ) +
+      scalar(
+        db,
+        'SELECT COUNT(*) FROM videos WHERE client_id = ? AND paid_at IS NULL AND invoice_id IS NULL',
+        id
+      )
   }
 }
 

@@ -100,6 +100,14 @@ export function createProject(db: DatabaseSync, input: ProjectInput): ProjectRow
 }
 
 export function updateProject(db: DatabaseSync, id: number, input: ProjectInput): ProjectRow {
+  const current = getProject(db, id)
+  if (!current) throw new Error('Project not found.')
+  // Invoice items snapshot the amount; the project row is only the source until it is billed.
+  if (current.invoiceId !== null && input.amountCents !== current.amountCents) {
+    throw new Error(
+      `On ${current.invoiceNumber ?? 'an invoice'} (draft) — delete the draft to change the price`
+    )
+  }
   db.prepare(
     `UPDATE projects SET client_id = ?, title = ?, description = ?, amount_cents = ?, status = ?
      WHERE id = ?`

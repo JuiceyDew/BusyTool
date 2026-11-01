@@ -12,6 +12,7 @@ import type {
   Settings,
   StatsSource,
   VideoRow,
+  UnpaidQueueRow,
   VideoStats,
   VideoTypeRow
 } from './types'
@@ -60,6 +61,7 @@ export interface ExpensePayload {
 export interface InvoiceCreatePayload {
   clientId: number
   projectIds: number[]
+  videoIds?: number[]
   dueDate?: string
   notes?: string
   extraItems?: Array<{ description: string; amountCents: number }>
@@ -111,11 +113,17 @@ export interface IpcMap {
   'projects:delete': { req: { id: number }; res: null }
 
   'videos:list': {
-    req: { clientId?: number; projectId?: number; platform?: 'tiktok' | 'instagram' | 'youtube' | 'other' }
+    req: {
+      clientId?: number
+      projectId?: number
+      platform?: 'tiktok' | 'instagram' | 'youtube' | 'other'
+      payment?: 'paid' | 'unpaid' | 'invoiced'
+    }
     res: VideoRow[]
   }
   'videos:create': { req: VideoPayload; res: VideoRow }
   'videos:update': { req: VideoPayload & { id: number }; res: VideoRow }
+  'videos:setPaid': { req: { id: number; paid: boolean }; res: VideoRow }
   'videos:delete': { req: { id: number }; res: null }
   'videos:addStats': {
     req: { id: number; views: number; likes: number; comments: number; shares: number; source?: StatsSource }
@@ -141,6 +149,7 @@ export interface IpcMap {
   'settings:update': { req: Settings; res: Settings }
 
   'dashboard:summary': { req: Record<string, never>; res: DashboardSummary }
+  'dashboard:unpaidQueue': { req: { limit?: number }; res: UnpaidQueueRow[] }
 
   'app:openExternal': { req: { url: string }; res: null }
   'app:dataPath': { req: Record<string, never>; res: string }
@@ -171,6 +180,7 @@ export const CHANNELS: Channel[] = [
   'videos:list',
   'videos:create',
   'videos:update',
+  'videos:setPaid',
   'videos:delete',
   'videos:addStats',
   'videos:fetchStats',
@@ -189,6 +199,7 @@ export const CHANNELS: Channel[] = [
   'settings:get',
   'settings:update',
   'dashboard:summary',
+  'dashboard:unpaidQueue',
   'app:openExternal',
   'app:dataPath',
   'app:updateCheck',

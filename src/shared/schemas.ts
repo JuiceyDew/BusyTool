@@ -58,6 +58,7 @@ const expensePayload = z.object({
 const invoiceCreate = z.object({
   clientId: id,
   projectIds: z.array(id).max(500),
+  videoIds: z.array(id).max(500).optional(),
   dueDate: isoDate.optional(),
   notes: optionalText,
   extraItems: z
@@ -103,9 +104,15 @@ export const SCHEMAS: Record<Channel, z.ZodType> = {
   'projects:setPaid': z.object({ id, paid: z.boolean() }),
   'projects:delete': z.object({ id }),
 
-  'videos:list': z.object({ clientId: id.optional(), projectId: id.optional(), platform: platform.optional() }),
+  'videos:list': z.object({
+    clientId: id.optional(),
+    projectId: id.optional(),
+    platform: platform.optional(),
+    payment: payment.optional()
+  }),
   'videos:create': videoPayload,
   'videos:update': videoPayload.extend({ id }),
+  'videos:setPaid': z.object({ id, paid: z.boolean() }),
   'videos:delete': z.object({ id }),
   'videos:addStats': z.object({
     id,
@@ -135,6 +142,7 @@ export const SCHEMAS: Record<Channel, z.ZodType> = {
   'settings:update': settingsPayload,
 
   'dashboard:summary': empty,
+  'dashboard:unpaidQueue': z.object({ limit: z.number().int().min(1).max(200).optional() }),
 
   'app:openExternal': z.object({ url: z.string().url().refine((u) => u.startsWith('https://'), 'Only https links can be opened') }),
   'app:dataPath': empty,

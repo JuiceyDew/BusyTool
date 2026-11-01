@@ -1,7 +1,8 @@
 # BusyTool
 
-Single-user desktop app for a video freelancer: clients, priced projects, invoices, and
-engagement stats for the videos you deliver. Local SQLite only — no accounts, no server.
+Single-user desktop app for a video freelancer: clients, priced projects, individually billable
+videos, invoices, and engagement stats for the videos you deliver. Local SQLite only — no
+accounts, no server.
 
 ## Run it
 
@@ -15,7 +16,7 @@ The first launch creates `~/.config/BusyTool/busytool.db`.
 ## Build the AppImage
 
 ```bash
-npm run dist         # → release/BusyTool-0.1.0.AppImage
+npm run dist         # → release/BusyTool-0.4.0.AppImage
 ```
 
 The AppImage is built with `--no-sandbox` baked in, because kernels with
@@ -25,7 +26,7 @@ Chromium's sandbox cannot start. The renderer only ever loads bundled local file
 Run it:
 
 ```bash
-APPIMAGE_EXTRACT_AND_RUN=1 ./release/BusyTool-0.1.0.AppImage   # needed when only libfuse3 is installed
+APPIMAGE_EXTRACT_AND_RUN=1 ./release/BusyTool-0.4.0.AppImage   # needed when only libfuse3 is installed
 ```
 
 ## Releasing an update
@@ -49,16 +50,36 @@ managed by git. `BUSYTOOL_UPDATE_API` overrides the release-API URL for local te
 ```bash
 npm run typecheck
 npm test                                  # unit + repo tests, in-memory SQLite
+BUSYTOOL_DATA_DIR=/tmp/bt BUSYTOOL_SMOKE=1 npx electron . --no-sandbox   # seeded screenshot + PDF
 LIVE_STATS=1 npx vitest run tests/tiktok.integration.test.ts   # real TikTok fetch (network)
 ```
 
 ## Where the money comes from
 
-- **Income** = paid invoice totals + projects you marked paid directly.
-- **Outstanding** = unpaid projects not on an invoice + draft/sent invoice totals.
+Two kinds of billable, each with its own price and its own paid state:
+
+- **Projects** — `amount_cents` covers the non-video work. It is never derived from the videos
+  inside it, so a project holding three $150 reels can still bill $0 of its own: the videos bill
+  separately. A project with videos opens with the fee at `0` and shows
+  `Videos bill separately ($450.00 across 3)`; give it a fee too and it shows the live combined
+  total instead (mixed engagements are allowed).
+- **Videos** — each video has its own price, prefilled from the price-list type (Settings →
+  Video types) and editable, which covers both "same price" and "varies". Every video can be
+  marked paid on its own or invoiced alone or with others.
+
+Rules, enforced in one place (`src/main/repo/money-queries.ts`):
+
+- A billable is **paid** when `paid_at` is set or its invoice is paid, **invoiced** when it sits on
+  an invoice that is not paid, and **unpaid** when it has neither. Marking one paid directly while
+  it is on an invoice fails with `… is on invoice INV-…; mark the invoice paid instead.`
+- **Income** = paid invoice item totals + projects and videos paid directly.
+- **Outstanding** = unpaid projects + unpaid videos not on an invoice + draft/sent invoice totals.
 - **Gross profit** = income − logged expenses.
-- Videos are deliverables, not income: their prices roll up per project and the project fee is
-  what gets invoiced. Amounts are integer cents in one currency (Settings, default USD).
+- Invoice lines are **snapshots**. Changing a price after invoicing cannot change the invoice; while
+  a billable is on a draft its price field is locked (`On INV-… (draft) — delete the draft to
+  change the price`). Delete the draft — or send it back to draft first — to edit or re-bill.
+
+Amounts are integer cents in one currency (Settings, default USD).
 
 ## Data and backups
 

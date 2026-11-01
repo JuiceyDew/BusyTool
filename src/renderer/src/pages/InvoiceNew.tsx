@@ -9,7 +9,7 @@ import { Card } from '../components/ui/Card'
 import { Field, Input, Select, Textarea } from '../components/ui/Input'
 import { BackLink, Loading, PageHeader } from '../components/ui/PageHeader'
 import { showError } from '../lib/toast'
-import type { ClientRow, ProjectRow, Settings } from '@shared/types'
+import type { ClientRow, ProjectRow, Settings, VideoRow } from '@shared/types'
 
 interface ExtraItem {
   description: string
@@ -21,10 +21,15 @@ export function InvoiceNewPage() {
   const [params] = useSearchParams()
   const presetClient = params.get('clientId')
   const presetProject = params.get('projectId')
+  const presetVideos = (params.get('videoIds') ?? '')
+    .split(',')
+    .map((value) => Number(value))
+    .filter((value) => Number.isInteger(value) && value > 0)
   const today = todayISO()
 
   const [clientId, setClientId] = useState<number | null>(presetClient ? Number(presetClient) : null)
   const [selected, setSelected] = useState<number[]>(presetProject ? [Number(presetProject)] : [])
+  const [selectedVideos, setSelectedVideos] = useState<number[]>(presetVideos)
   const [dueDate, setDueDate] = useState('')
   const [notes, setNotes] = useState('')
   const [extras, setExtras] = useState<ExtraItem[]>([])
@@ -77,6 +82,11 @@ export function InvoiceNewPage() {
     return (await call('projects:list', { clientId, payment: 'unpaid' })) as ProjectRow[]
   }, [clientId])
 
+  const videos = useAsync(async () => {
+    if (!clientId) return [] as VideoRow[]
+    return (await call('videos:list', { clientId, payment: 'unpaid' })) as VideoRow[]
+  }, [clientId])
+
   const currency = base.data?.settings.currency ?? 'USD'
   const money = (cents: number): string => formatCents(cents, currency)
 
@@ -84,7 +94,12 @@ export function InvoiceNewPage() {
     () => (projects.data ?? []).filter((project) => selected.includes(project.id)),
     [projects.data, selected]
   )
+  const chosenVideos = useMemo(
+    () => (videos.data ?? []).filter((video) => selectedVideos.includes(video.id)),
+    [videos.data, selectedVideos]
+  )
   const projectTotal = chosen.reduce((sum, project) => sum + project.amountCents, 0)
+  const videoTotal = chosenVideos.reduce((sum, video) => sum + video.priceCents, 0)
   const extraTotal = extras.reduce((sum, extra) => sum + (parseAmountToCents(extra.amount) ?? 0), 0)
 
   const submit = async (): Promise<void> => {
@@ -92,8 +107,8 @@ export function InvoiceNewPage() {
       setError('Pick a client')
       return
     }
-    if (selected.length === 0 && extras.length === 0) {
-      setError('Select at least one project or add a line item.')
+    if (selected.length === 0 && selectedVideos.length === 0 && extras.length === 0) {
+      setError('Select at least one project or video, or add a line item.')
       return
     }
     const extraItems = extras
@@ -108,6 +123,7 @@ export function InvoiceNewPage() {
       const created = await call('invoices:create', {
         clientId,
         projectIds: selected,
+        videoIds: selectedVideos,
         dueDate: dueDate || undefined,
         notes: notes || undefined,
         extraItems: extraItems.length ? extraItems : undefined
@@ -144,6 +160,7 @@ export function InvoiceNewPage() {
                 onChange={(event) => {
                   setClientId(Number(event.target.value))
                   setSelected([])
+                  setSelectedVideos([])
                 }}
               >
                 {base.data.clients.map((client) => (
@@ -186,6 +203,45 @@ export function InvoiceNewPage() {
                       {project.title}
                     </label>
                     <span className="text-sm tabular-nums text-zinc-600">{money(project.amountCents)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="mt-4">
+            <p className="mb-1.5 text-xs font-medium text-zinc-600">Unpaid videos</p>
+            {videos.loading && !videos.data ? (
+              <p className="text-sm text-zinc-400">Loading…</p>
+            ) : (videos.data ?? []).length === 0 ? (
+              <p className="rounded-lg border border-dashed border-zinc-200 px-3 py-4 text-xs text-zinc-500">
+                No unpaid, non-invoiced videos for this client.
+              </p>
+            ) : (
+              <ul className="divide-y divide-zinc-100 rounded-lg border border-zinc-200">
+                {(videos.data ?? []).map((video) => (
+                  <li key={video.id} className="flex items-center justify-between gap-3 px-3 py-2">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        className="size-4 accent-zinc-900"
+                        checked={selectedVideos.includes(video.id)}
+                        onChange={(event) =>
+                          setSelectedVideos((current) =>
+                            event.target.checked
+                              ? [...current, video.id]
+                              : current.filter((id) => id !== video.id)
+                          )
+                        }
+                      />
+                      <span>
+                        {video.title || `Video #${video.id}`}
+                        <span className="ml-1.5 text-xs text-zinc-400">
+                          {video.videoTypeName ?? video.platform}
+                        </span>
+                      </span>
+                    </label>
+                    <span className="text-sm tabular-nums text-zinc-600">{money(video.priceCents)}</span>
                   </li>
                 ))}
               </ul>
@@ -256,11 +312,17 @@ export function InvoiceNewPage() {
 
         <Card className="h-fit p-4">
           <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Invoice total</p>
-          <p className="mt-2 text-2xl font-semibold tabular-nums">{money(projectTotal + extraTotal)}</p>
+          <p className="mt-2 text-2xl font-semibold tabular-nums">
+            {money(projectTotal + videoTotal + extraTotal)}
+          </p>
           <dl className="mt-3 space-y-1 text-xs text-zinc-500">
             <div className="flex justify-between">
               <dt>Projects ({chosen.length})</dt>
               <dd className="tabular-nums">{money(projectTotal)}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt>Videos ({chosenVideos.length})</dt>
+              <dd className="tabular-nums">{money(videoTotal)}</dd>
             </div>
             <div className="flex justify-between">
               <dt>Extra lines ({extras.length})</dt>
@@ -271,6 +333,9 @@ export function InvoiceNewPage() {
             {pending ? <ButtonSpinner>Creating…</ButtonSpinner> : 'Create draft invoice'}
           </Button>
           <p className="mt-2 text-xs text-zinc-400">
+            {chosenVideos.length > 0
+              ? `${chosenVideos.length} video${chosenVideos.length === 1 ? '' : 's'} · ${money(videoTotal)}. `
+              : ''}
             Amounts are snapshotted now. Delete the draft to change them.
           </p>
         </Card>

@@ -1,8 +1,8 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { tx } from '../db'
-import { nowTimestamp } from '../../shared/date'
+import { nowTimestamp, todayISO } from '../../shared/date'
 import { detectPlatform } from '../../shared/platform'
-import type { Platform, StatsSource, VideoRow, VideoStats, VideoStatus } from '../../shared/types'
+import type { Payment, Platform, StatsSource, VideoRow, VideoStats, VideoStatus } from '../../shared/types'
 import { nullableNum, nullableStr, num, oneOf, str, type Row } from '../rows'
 
 export interface VideoInput {
@@ -27,7 +27,11 @@ const STATS_SUBQUERY = `(SELECT s.id FROM video_stats s WHERE s.video_id = v.id
 const COLUMNS = `v.id, v.client_id AS clientId, c.name AS clientName, v.project_id AS projectId,
   p.title AS projectTitle, v.video_type_id AS videoTypeId, t.name AS videoTypeName,
   v.title, v.platform, v.url, v.price_cents AS priceCents, v.status,
-  v.published_at AS publishedAt, v.created_at AS createdAt,
+  v.published_at AS publishedAt, v.paid_at AS paidAt, v.invoice_id AS invoiceId,
+  i.number AS invoiceNumber, v.created_at AS createdAt,
+  CASE WHEN v.paid_at IS NOT NULL OR i.status = 'paid' THEN 'paid'
+       WHEN v.invoice_id IS NOT NULL THEN 'invoiced'
+       ELSE 'unpaid' END AS payment,
   ${STATS_SUBQUERY},
   (SELECT COUNT(*) FROM video_stats s WHERE s.video_id = v.id) AS statsCount`
 
@@ -70,7 +74,11 @@ function mapVideo(db: DatabaseSync, row: Row): VideoRow {
     priceCents: num(row.priceCents),
     status: oneOf<VideoStatus>(row.status, VIDEO_STATUSES, 'todo'),
     publishedAt: nullableStr(row.publishedAt),
+    paidAt: nullableStr(row.paidAt),
+    invoiceId: nullableNum(row.invoiceId),
+    invoiceNumber: nullableStr(row.invoiceNumber),
     createdAt: str(row.createdAt),
+    payment: oneOf<Payment>(row.payment, ['paid', 'unpaid', 'invoiced'], 'unpaid'),
     latestStats: readStats(db, nullableNum(row.latestStatsId)),
     statsCount: num(row.statsCount)
   }
@@ -79,11 +87,12 @@ function mapVideo(db: DatabaseSync, row: Row): VideoRow {
 const FROM = `FROM videos v
   JOIN clients c ON c.id = v.client_id
   LEFT JOIN projects p ON p.id = v.project_id
-  LEFT JOIN video_types t ON t.id = v.video_type_id`
+  LEFT JOIN video_types t ON t.id = v.video_type_id
+  LEFT JOIN invoices i ON i.id = v.invoice_id`
 
 export function listVideos(
   db: DatabaseSync,
-  opts: { clientId?: number; projectId?: number; platform?: Platform } = {}
+  opts: { clientId?: number; projectId?: number; platform?: Platform; payment?: Payment } = {}
 ): VideoRow[] {
   const where: string[] = []
   const params: Array<string | number> = []
@@ -99,9 +108,17 @@ export function listVideos(
     where.push('v.platform = ?')
     params.push(opts.platform)
   }
+  if (opts.payment) {
+    where.push(
+      `(CASE WHEN v.paid_at IS NOT NULL OR i.status = 'paid' THEN 'paid'
+             WHEN v.invoice_id IS NOT NULL THEN 'invoiced'
+             ELSE 'unpaid' END) = ?`
+    )
+    params.push(opts.payment)
+  }
   const sql = `SELECT ${COLUMNS} ${FROM}
     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-    ORDER BY v.created_at DESC, v.id DESC`
+    ORDER BY v.paid_at IS NOT NULL ASC, v.created_at DESC, v.id DESC`
   return db.prepare(sql).all(...params).map((row) => mapVideo(db, row))
 }
 
@@ -147,6 +164,12 @@ export function updateVideo(db: DatabaseSync, id: number, input: VideoInput): Vi
   const typeChanged = (input.videoTypeId ?? null) !== current.videoTypeId
   const priceCents =
     input.priceCents ?? (typeChanged ? defaultPriceFor(db, input.videoTypeId) : current.priceCents)
+  // Items are snapshots: a billed video's price is frozen until the draft invoice is deleted.
+  if (current.invoiceId !== null && priceCents !== current.priceCents) {
+    throw new Error(
+      `On ${current.invoiceNumber ?? 'an invoice'} (draft) — delete the draft to change the price`
+    )
+  }
   const platform = input.platform ?? detectPlatform(input.url ?? current.url)
 
   db.prepare(
@@ -169,8 +192,32 @@ export function updateVideo(db: DatabaseSync, id: number, input: VideoInput): Vi
   return updated
 }
 
+export function setVideoPaid(db: DatabaseSync, id: number, paid: boolean): VideoRow {
+  tx(db, () => {
+    const current = getVideo(db, id)
+    if (!current) throw new Error('Video not found.')
+    if (current.invoiceId !== null) {
+      throw new Error(`Video is on invoice ${current.invoiceNumber ?? ''}; mark the invoice paid instead.`)
+    }
+    db.prepare('UPDATE videos SET paid_at = ? WHERE id = ?').run(paid ? todayISO() : null, id)
+  })
+  const updated = getVideo(db, id)
+  if (!updated) throw new Error('Video not found.')
+  return updated
+}
+
 export function deleteVideo(db: DatabaseSync, id: number): void {
-  db.prepare('DELETE FROM videos WHERE id = ?').run(id)
+  tx(db, () => {
+    const current = getVideo(db, id)
+    if (!current) throw new Error('Video not found.')
+    if (current.invoiceId !== null) {
+      throw new Error(
+        `Video is on invoice ${current.invoiceNumber ?? ''}; delete the draft invoice first.`
+      )
+    }
+    // video_stats cascade; invoice_items.video_id is ON DELETE SET NULL.
+    db.prepare('DELETE FROM videos WHERE id = ?').run(id)
+  })
 }
 
 export function addStats(

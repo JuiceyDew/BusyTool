@@ -12,6 +12,8 @@ import {
   updateInvoice
 } from '../src/main/repo/invoices'
 import { listProjects } from '../src/main/repo/projects'
+import { createVideo, getVideo, listVideos, setVideoPaid } from '../src/main/repo/videos'
+import { createVideoType } from '../src/main/repo/videoTypes'
 
 function setup() {
   const db = openDatabase(':memory:')
@@ -148,7 +150,7 @@ describe('invoice creation', () => {
   it('rejects an empty invoice', () => {
     const { db, client } = setup()
     expect(() => createInvoice(db, { clientId: client.id, projectIds: [] })).toThrow(
-      'Add at least one project or line item.'
+      'Add at least one project or video to the invoice.'
     )
     db.close()
   })
@@ -197,18 +199,23 @@ describe('invoice status', () => {
     db.close()
   })
 
-  it('only allows draft -> sent -> draft transitions', () => {
+  it('can return a sent or paid invoice to draft so it can be corrected', () => {
     const { db, client, a } = setup()
     const invoice = createInvoice(db, { clientId: client.id, projectIds: [a.id] }, { today: '2026-05-01' })
+
     setInvoiceStatus(db, invoice.invoice.id, 'sent')
     expect(getInvoice(db, invoice.invoice.id)?.invoice.status).toBe('sent')
-    expect(() => setInvoiceStatus(db, invoice.invoice.id, 'draft')).not.toThrow()
+    setInvoiceStatus(db, invoice.invoice.id, 'draft')
     expect(getInvoice(db, invoice.invoice.id)?.invoice.status).toBe('draft')
 
     setInvoiceStatus(db, invoice.invoice.id, 'paid')
-    expect(() => setInvoiceStatus(db, invoice.invoice.id, 'draft')).toThrow(
-      'Only sent invoices can return to draft.'
-    )
+    setInvoiceStatus(db, invoice.invoice.id, 'draft')
+    const back = getInvoice(db, invoice.invoice.id)
+    expect(back?.invoice.status).toBe('draft')
+    expect(back?.invoice.paidAt).toBeNull()
+    // Items and billable links survive the round trip, so the draft can be deleted afterwards.
+    expect(back?.items).toHaveLength(1)
+    expect(getProject(db, a.id)?.invoiceId).toBe(invoice.invoice.id)
     db.close()
   })
 })
@@ -245,7 +252,7 @@ describe('invoice editing and deletion', () => {
     const invoice = createInvoice(db, { clientId: client.id, projectIds: [a.id] }, { today: '2026-05-01' })
     setInvoiceStatus(db, invoice.invoice.id, 'sent')
     expect(() => deleteInvoice(db, invoice.invoice.id)).toThrow(
-      'Only draft invoices can be deleted; mark it unpaid/void by recreating instead.'
+      'Only draft invoices can be deleted; set it back to draft first.'
     )
     db.close()
   })
@@ -281,6 +288,128 @@ describe('invoice editing and deletion', () => {
     expect(listInvoices(db, { status: 'paid' }).map((i) => i.number)).toEqual(['INV-2026-001'])
     expect(listInvoices(db, { status: 'draft' })).toHaveLength(1)
     expect(listInvoices(db, { clientId: other.id })).toHaveLength(0)
+    db.close()
+  })
+})
+
+describe('invoice video billing', () => {
+  function videoSetup() {
+    const db = openDatabase(':memory:')
+    const client = createClient(db, { name: 'Acme Studio' })
+    const other = createClient(db, { name: 'Beta Films' })
+    const project = createProject(db, { clientId: client.id, title: 'Spring campaign', amountCents: 65000 })
+    const reel = createVideoType(db, { name: 'Reel', defaultPriceCents: 15000 })
+    const v1 = createVideo(db, { clientId: client.id, videoTypeId: reel.id, title: 'Reel one' })
+    const v2 = createVideo(db, { clientId: client.id, videoTypeId: reel.id, title: 'Reel two' })
+    return { db, client, other, project, v1, v2 }
+  }
+
+  it('mixes project and video lines and points each item back at its source', () => {
+    const { db, client, project, v1, v2 } = videoSetup()
+    const invoice = createInvoice(
+      db,
+      { clientId: client.id, projectIds: [project.id], videoIds: [v1.id, v2.id] },
+      { today: '2026-05-01' }
+    )
+
+    expect(invoice.invoice.totalCents).toBe(95000)
+    expect(invoice.invoice.projectCount).toBe(1)
+    expect(invoice.invoice.videoCount).toBe(2)
+    expect(invoice.items.map((item) => [item.description, item.amountCents, item.kind])).toEqual([
+      ['Spring campaign', 65000, 'project'],
+      ['Reel — Reel one', 15000, 'video'],
+      ['Reel — Reel two', 15000, 'video']
+    ])
+    expect(invoice.items[0].projectId).toBe(project.id)
+    expect(invoice.items[1].videoId).toBe(v1.id)
+    expect(invoice.items[2].videoId).toBe(v2.id)
+    expect(invoice.videos.map((video) => video.id).sort()).toEqual([v1.id, v2.id].sort())
+    db.close()
+  })
+
+  it('keeps the total a snapshot when prices change later', () => {
+    const { db, client, project, v1 } = videoSetup()
+    const invoice = createInvoice(
+      db,
+      { clientId: client.id, projectIds: [project.id], videoIds: [v1.id] },
+      { today: '2026-05-01' }
+    )
+    db.prepare('UPDATE projects SET amount_cents = 999999 WHERE id = ?').run(project.id)
+    db.prepare('UPDATE videos SET price_cents = 888888 WHERE id = ?').run(v1.id)
+    expect(getInvoice(db, invoice.invoice.id)?.invoice.totalCents).toBe(80000)
+    db.close()
+  })
+
+  it('marks invoiced videos paid when the invoice is paid', () => {
+    const { db, client, v1, v2 } = videoSetup()
+    const invoice = createInvoice(db, { clientId: client.id, projectIds: [], videoIds: [v1.id, v2.id] }, { today: '2026-05-01' })
+    expect(listVideos(db, { payment: 'invoiced' }).map((video) => video.id).sort()).toEqual([v1.id, v2.id].sort())
+
+    setInvoiceStatus(db, invoice.invoice.id, 'paid')
+    expect(listVideos(db, { payment: 'paid' }).map((video) => video.id).sort()).toEqual([v1.id, v2.id].sort())
+    expect(listVideos(db, { payment: 'invoiced' })).toHaveLength(0)
+
+    setInvoiceStatus(db, invoice.invoice.id, 'unpaid')
+    expect(listVideos(db, { payment: 'invoiced' })).toHaveLength(2)
+    db.close()
+  })
+
+  it('rejects direct payment of an invoiced video with the invoice number', () => {
+    const { db, client, v1 } = videoSetup()
+    const invoice = createInvoice(db, { clientId: client.id, projectIds: [], videoIds: [v1.id] }, { today: '2026-05-01' })
+    expect(() => setVideoPaid(db, v1.id, true)).toThrow(
+      `Video is on invoice ${invoice.invoice.number}; mark the invoice paid instead.`
+    )
+    db.close()
+  })
+
+  it('rejects double-invoicing a video', () => {
+    const { db, client, v1 } = videoSetup()
+    createInvoice(db, { clientId: client.id, projectIds: [], videoIds: [v1.id] }, { today: '2026-05-01' })
+    expect(() =>
+      createInvoice(db, { clientId: client.id, projectIds: [], videoIds: [v1.id] }, { today: '2026-05-02' })
+    ).toThrow('Video "Reel one" is already on an invoice.')
+    db.close()
+  })
+
+  it('rejects an already-paid video and a video from another client', () => {
+    const { db, client, other, v1, v2 } = videoSetup()
+    setVideoPaid(db, v1.id, true)
+    expect(() =>
+      createInvoice(db, { clientId: client.id, projectIds: [], videoIds: [v1.id] }, { today: '2026-05-01' })
+    ).toThrow('Video "Reel one" is already paid.')
+    expect(() =>
+      createInvoice(db, { clientId: other.id, projectIds: [], videoIds: [v2.id] }, { today: '2026-05-01' })
+    ).toThrow('Video "Reel two" belongs to another client.')
+    db.close()
+  })
+
+  it('unlinks videos when a draft is deleted', () => {
+    const { db, client, v1 } = videoSetup()
+    const invoice = createInvoice(db, { clientId: client.id, projectIds: [], videoIds: [v1.id] }, { today: '2026-05-01' })
+    deleteInvoice(db, invoice.invoice.id)
+    expect(getVideo(db, v1.id)?.invoiceId).toBeNull()
+    expect(getVideo(db, v1.id)?.payment).toBe('unpaid')
+    db.close()
+  })
+
+  it('lets a paid invoice go back to draft and then be deleted', () => {
+    const { db, client, v1 } = videoSetup()
+    const invoice = createInvoice(db, { clientId: client.id, projectIds: [], videoIds: [v1.id] }, { today: '2026-05-01' })
+    setInvoiceStatus(db, invoice.invoice.id, 'paid')
+    setInvoiceStatus(db, invoice.invoice.id, 'draft')
+    deleteInvoice(db, invoice.invoice.id)
+    expect(getVideo(db, v1.id)?.invoiceId).toBeNull()
+    expect(listVideos(db, { payment: 'unpaid' }).map((video) => video.id)).toContain(v1.id)
+    db.close()
+  })
+
+  it('names a title-less video by its id on the line item', () => {
+    const db = openDatabase(':memory:')
+    const client = createClient(db, { name: 'Acme Studio' })
+    const untitled = createVideo(db, { clientId: client.id, url: 'https://www.tiktok.com/@a/video/1' })
+    const invoice = createInvoice(db, { clientId: client.id, projectIds: [], videoIds: [untitled.id] })
+    expect(invoice.items[0].description).toBe(`Video #${untitled.id}`)
     db.close()
   })
 })

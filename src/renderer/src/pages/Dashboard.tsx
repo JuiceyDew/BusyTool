@@ -8,21 +8,21 @@ import { Badge, Card, CardHeader, EmptyState, StatCard } from '../components/ui/
 import { Loading, PageHeader } from '../components/ui/PageHeader'
 import { Table, Td, Th, Tr } from '../components/ui/Table'
 import { Button } from '../components/ui/Button'
-import type { DashboardSummary, InvoiceRow, ProjectRow, Settings } from '@shared/types'
+import type { DashboardSummary, InvoiceRow, Settings, UnpaidQueueRow } from '@shared/types'
 
 export function DashboardPage() {
   const navigate = useNavigate()
   const state = useAsync(async () => {
-    const [summary, unpaid, invoices, settings] = await Promise.all([
+    const [summary, queue, invoices, settings] = await Promise.all([
       call('dashboard:summary', {}),
-      call('projects:list', { payment: 'unpaid' }),
+      call('dashboard:unpaidQueue', { limit: 10 }),
       call('invoices:list', {}),
       call('settings:get', {})
     ])
     return {
       summary: summary as DashboardSummary,
-      unpaid: unpaid as ProjectRow[],
-      pendingInvoices: (invoices as InvoiceRow[]).filter((i) => i.status !== 'paid'),
+      queue: queue as UnpaidQueueRow[],
+      pendingInvoices: (invoices as InvoiceRow[]).filter((invoice) => invoice.status !== 'paid'),
       settings: settings as Settings
     }
   }, [])
@@ -31,12 +31,12 @@ export function DashboardPage() {
   if (state.error) return <p className="text-sm text-red-600">{state.error}</p>
   if (!state.data) return null
 
-  const { summary, unpaid, pendingInvoices, settings } = state.data
+  const { summary, queue, pendingInvoices, settings } = state.data
   const money = (cents: number): string => formatCents(cents, settings.currency)
   const isEmpty =
     summary.clientCount === 0 &&
     summary.expenseTotalCount === 0 &&
-    unpaid.length === 0 &&
+    queue.length === 0 &&
     pendingInvoices.length === 0
 
   return (
@@ -56,7 +56,7 @@ export function DashboardPage() {
         <StatCard
           label="Outstanding"
           value={money(summary.outstandingCents)}
-          hint="Unpaid projects and invoices"
+          hint="Unpaid projects, videos and invoices"
           tone="amber"
         />
         <StatCard label="Expenses" value={money(summary.expensesCents)} hint="Logged costs" />
@@ -71,9 +71,11 @@ export function DashboardPage() {
       <p className="mt-3 text-xs text-zinc-500">
         Income this month: <span className="font-medium text-zinc-800">{money(summary.incomeThisMonthCents)}</span>
         {' · '}
-        {summary.paidProjectCount} paid project{summary.paidProjectCount === 1 ? '' : 's'}
+        Outstanding: <span className="text-zinc-800">{money(summary.outstandingProjectsCents)} projects</span>
         {' · '}
-        {summary.unpaidProjectCount} unpaid
+        <span className="text-zinc-800">{money(summary.outstandingVideosCents)} videos</span>
+        {' · '}
+        <span className="text-zinc-800">{money(summary.outstandingInvoicesCents)} invoices</span>
       </p>
 
       {isEmpty ? (
@@ -81,7 +83,7 @@ export function DashboardPage() {
           <EmptyState
             icon={<Users size={28} />}
             title="Add a client to get started"
-            description="Create a client, then add priced projects and generate invoices from them."
+            description="Create a client, then add priced projects and videos, and invoice what they owe."
             action={
               <Link to="/clients">
                 <Button variant="primary">Go to clients</Button>
@@ -93,31 +95,56 @@ export function DashboardPage() {
         <div className="mt-6 space-y-6">
           <Card>
             <CardHeader
-              title="Unpaid projects"
-              subtitle="Not invoiced yet — mark paid or bundle them into an invoice."
+              title="Waiting to be paid"
+              subtitle="Unpaid projects and videos that are not on an invoice yet."
               actions={
-                <Link to="/projects" className="text-xs text-zinc-500 hover:text-zinc-900">
-                  All projects
+                <Link to="/invoices/new" className="text-xs text-zinc-500 hover:text-zinc-900">
+                  New invoice
                 </Link>
               }
             />
-            {unpaid.length === 0 ? (
-              <EmptyState title="Nothing unpaid" description="Every project is either paid or on an invoice." />
+            {queue.length === 0 ? (
+              <EmptyState title="Nothing unpaid" description="Every project and video is either paid or invoiced." />
             ) : (
               <Table>
                 <thead>
                   <tr>
                     <Th>Client</Th>
-                    <Th>Project</Th>
+                    <Th>Kind</Th>
+                    <Th>Item</Th>
                     <Th className="text-right">Amount</Th>
+                    <Th className="text-right">Actions</Th>
                   </tr>
                 </thead>
                 <tbody>
-                  {unpaid.map((project) => (
-                    <Tr key={project.id} onClick={() => navigate('/projects')}>
-                      <Td className="text-zinc-500">{project.clientName}</Td>
-                      <Td className="font-medium">{project.title}</Td>
-                      <Td className="text-right tabular-nums">{money(project.amountCents)}</Td>
+                  {queue.map((row) => (
+                    <Tr
+                      key={`${row.kind}-${row.id}`}
+                      onClick={() => navigate(row.kind === 'project' ? '/projects' : '/videos')}
+                    >
+                      <Td className="text-zinc-500">{row.clientName}</Td>
+                      <Td>
+                        <Badge tone={row.kind === 'project' ? 'blue' : 'zinc'}>
+                          {row.kind === 'project' ? 'Project' : 'Video'}
+                        </Badge>
+                      </Td>
+                      <Td className="font-medium">{row.title}</Td>
+                      <Td className="text-right tabular-nums">{money(row.amountCents)}</Td>
+                      <Td>
+                        <div className="flex justify-end">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              const param = row.kind === 'project' ? 'projectId' : 'videoIds'
+                              navigate(`/invoices/new?clientId=${row.clientId}&${param}=${row.id}`)
+                            }}
+                          >
+                            Invoice
+                          </Button>
+                        </div>
+                      </Td>
                     </Tr>
                   ))}
                 </tbody>

@@ -4,7 +4,8 @@ import { createClient } from '../src/main/repo/clients'
 import { createProject, setProjectPaid } from '../src/main/repo/projects'
 import { createInvoice, setInvoiceStatus } from '../src/main/repo/invoices'
 import { createExpense, deleteExpense, listExpenses, updateExpense } from '../src/main/repo/expenses'
-import { dashboardSummary } from '../src/main/repo/dashboard'
+import { dashboardSummary, unpaidQueue } from '../src/main/repo/dashboard'
+import { createVideo, setVideoPaid } from '../src/main/repo/videos'
 import { getSettings, updateSettings } from '../src/main/repo/settings'
 
 describe('dashboardSummary', () => {
@@ -160,6 +161,117 @@ describe('settings repo', () => {
     const db = openDatabase(':memory:')
     const saved = updateSettings(db, { ...getSettings(db), invoicePrefix: '   ' })
     expect(saved.invoicePrefix).toBe('INV')
+    db.close()
+  })
+})
+
+describe('dashboard money with billable videos', () => {
+  it('counts each billable exactly once across every payment path', () => {
+    const db = openDatabase(':memory:')
+    const client = createClient(db, { name: 'Acme' })
+
+    // Directly paid: project $500 + video $150.
+    const paidProject = createProject(db, { clientId: client.id, title: 'Paid project', amountCents: 50000 })
+    setProjectPaid(db, paidProject.id, true)
+    const paidVideo = createVideo(db, { clientId: client.id, title: 'Paid video', priceCents: 15000 })
+    setVideoPaid(db, paidVideo.id, true)
+
+    // A paid invoice for $700 (a project).
+    const invoicedProject = createProject(db, { clientId: client.id, title: 'Invoiced', amountCents: 70000 })
+    const paidInvoice = createInvoice(
+      db,
+      { clientId: client.id, projectIds: [invoicedProject.id] },
+      { today: '2026-05-01' }
+    )
+    setInvoiceStatus(db, paidInvoice.invoice.id, 'paid')
+
+    // Unpaid: project $300, video $150.
+    createProject(db, { clientId: client.id, title: 'Unpaid project', amountCents: 30000 })
+    createVideo(db, { clientId: client.id, title: 'Unpaid video', priceCents: 15000 })
+
+    // A draft invoice for $200 with only an extra line.
+    createInvoice(db, {
+      clientId: client.id,
+      projectIds: [],
+      extraItems: [{ description: 'Rush fee', amountCents: 20000 }]
+    })
+
+    createExpense(db, { date: '2026-05-03', label: 'Music licence', amountCents: 20000 })
+
+    const summary = dashboardSummary(db, '2026-05-10')
+    expect(summary.incomeCents).toBe(135000)
+    expect(summary.expensesCents).toBe(20000)
+    expect(summary.grossProfitCents).toBe(115000)
+    expect(summary.outstandingCents).toBe(65000)
+    expect(summary.outstandingProjectsCents).toBe(30000)
+    expect(summary.outstandingVideosCents).toBe(15000)
+    expect(summary.outstandingInvoicesCents).toBe(20000)
+    expect(summary.paidVideoCount).toBe(1)
+    expect(summary.unpaidVideoCount).toBe(1)
+    db.close()
+  })
+
+  it('does not count a video twice when its invoice is paid after direct marking', () => {
+    const db = openDatabase(':memory:')
+    const client = createClient(db, { name: 'Acme' })
+    const video = createVideo(db, { clientId: client.id, title: 'Reel', priceCents: 15000 })
+    const invoice = createInvoice(db, { clientId: client.id, projectIds: [], videoIds: [video.id] })
+    setInvoiceStatus(db, invoice.invoice.id, 'paid')
+    // Force a stale direct-paid flag: income must still only see the invoice total.
+    db.prepare("UPDATE videos SET paid_at = '2026-05-02' WHERE id = ?").run(video.id)
+    expect(dashboardSummary(db, '2026-05-10').incomeCents).toBe(15000)
+    db.close()
+  })
+
+  it('includes directly-paid videos in this month income', () => {
+    const db = openDatabase(':memory:')
+    const client = createClient(db, { name: 'Acme' })
+    const video = createVideo(db, { clientId: client.id, title: 'Reel', priceCents: 15000 })
+    setVideoPaid(db, video.id, true)
+    db.prepare("UPDATE videos SET paid_at = '2026-05-04' WHERE id = ?").run(video.id)
+    expect(dashboardSummary(db, '2026-05-31').incomeThisMonthCents).toBe(15000)
+    expect(dashboardSummary(db, '2026-06-01').incomeThisMonthCents).toBe(0)
+    db.close()
+  })
+})
+
+describe('unpaidQueue', () => {
+  it('lists unpaid projects and videos, newest first, with a readable title', () => {
+    const db = openDatabase(':memory:')
+    const client = createClient(db, { name: 'Acme' })
+    createProject(db, { clientId: client.id, title: 'Spot', amountCents: 30000 })
+    const untitled = createVideo(db, { clientId: client.id, priceCents: 15000 })
+    const paid = createVideo(db, { clientId: client.id, title: 'Done', priceCents: 1000 })
+    setVideoPaid(db, paid.id, true)
+
+    const queue = unpaidQueue(db, 10)
+    expect(queue).toHaveLength(2)
+    const untitledRow = queue.find((row) => row.kind === 'video')
+    expect(untitledRow).toMatchObject({ title: `Video #${untitled.id}`, amountCents: 15000 })
+    const projectRow = queue.find((row) => row.kind === 'project')
+    expect(projectRow).toMatchObject({ title: 'Spot', amountCents: 30000, clientName: 'Acme' })
+    db.close()
+  })
+
+  it('orders newest first and honours the limit', () => {
+    const db = openDatabase(':memory:')
+    const client = createClient(db, { name: 'Acme' })
+    const older = createProject(db, { clientId: client.id, title: 'Older', amountCents: 100 })
+    db.prepare("UPDATE projects SET created_at = '2026-05-01T00:00:00.000Z' WHERE id = ?").run(older.id)
+    const newer = createProject(db, { clientId: client.id, title: 'Newer', amountCents: 200 })
+    db.prepare("UPDATE projects SET created_at = '2026-05-02T00:00:00.000Z' WHERE id = ?").run(newer.id)
+
+    expect(unpaidQueue(db, 10).map((row) => row.title)).toEqual(['Newer', 'Older'])
+    expect(unpaidQueue(db, 1).map((row) => row.title)).toEqual(['Newer'])
+    db.close()
+  })
+
+  it('skips billables that already sit on an invoice', () => {
+    const db = openDatabase(':memory:')
+    const client = createClient(db, { name: 'Acme' })
+    const video = createVideo(db, { clientId: client.id, title: 'Reel', priceCents: 15000 })
+    createInvoice(db, { clientId: client.id, projectIds: [], videoIds: [video.id] })
+    expect(unpaidQueue(db, 10)).toHaveLength(0)
     db.close()
   })
 })

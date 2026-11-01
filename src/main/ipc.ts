@@ -9,7 +9,7 @@ import * as videos from './repo/videos'
 import * as invoices from './repo/invoices'
 import * as expenses from './repo/expenses'
 import * as settings from './repo/settings'
-import { dashboardSummary } from './repo/dashboard'
+import { dashboardSummary, unpaidQueue } from './repo/dashboard'
 import { BLOCKED_MESSAGE, MISSING_BINARY_MESSAGE, fetchTikTokStats, resolveYtDlp } from './stats/tiktok'
 import { exportInvoicePdf } from './invoice-pdf'
 import { appImageInfo, checkForUpdate, downloadAndStage } from './updater/appimage'
@@ -70,6 +70,7 @@ const handlers: { [K in Channel]: Handler<K> } = {
   'videos:list': (req, { db }) => videos.listVideos(db, req),
   'videos:create': (req, { db }) => videos.createVideo(db, req as VideoPayload),
   'videos:update': (req, { db }) => videos.updateVideo(db, req.id, req as VideoPayload),
+  'videos:setPaid': (req, { db }) => videos.setVideoPaid(db, req.id, req.paid),
   'videos:delete': (req, { db }) => {
     videos.deleteVideo(db, req.id)
     return null
@@ -138,6 +139,7 @@ const handlers: { [K in Channel]: Handler<K> } = {
   'settings:update': (req, { db }) => settings.updateSettings(db, req as Settings),
 
   'dashboard:summary': (_req, { db }) => dashboardSummary(db),
+  'dashboard:unpaidQueue': (req, { db }) => unpaidQueue(db, req.limit ?? 10),
 
   'app:openExternal': async (req) => {
     await shell.openExternal(req.url)
