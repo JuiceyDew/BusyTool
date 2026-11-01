@@ -1,0 +1,67 @@
+{
+  "name": "busytool",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Client, project, invoice and video-stats tracker",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "fetch:ytdlp": "node scripts/fetch-ytdlp.mjs",
+    "dist": "node scripts/fetch-ytdlp.mjs && electron-vite build && electron-builder --linux AppImage"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.3",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.1",
+    "@vitejs/plugin-react": "5.2.0",
+    "electron": "^45.2.1",
+    "electron-builder": "26.18.0",
+    "electron-vite": "5.0.0",
+    "lucide-react": "1.66.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "react-router-dom": "7.18.5",
+    "tailwindcss": "4.3.3",
+    "typescript": "^5.9.3",
+    "vite": "7.3.7",
+    "vitest": "5.0.5",
+    "zod": "4.6.7"
+  },
+  "build": {
+    "appId": "com.busytool.app",
+    "productName": "BusyTool",
+    "directories": {
+      "buildResources": "build",
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/bin",
+        "to": "bin"
+      }
+    ],
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Office",
+      "icon": "build/icon.png",
+      "executableName": "busytool"
+    },
+    "appImage": {
+      "artifactName": "BusyTool-${version}.AppImage",
+      "executableArgs": [
+        "--no-sandbox"
+      ]
+    }
+  }
+}
