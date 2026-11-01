@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Cut a release: bump the version, build the AppImage, tag, and publish the AppImage +
-// update manifest to GitHub. Usage: npm run release -- patch|minor|major|<x.y.z>
+// Cut a release: build the AppImage at the next version, then commit, tag and publish the
+// AppImage + update manifest. Usage: npm run release -- patch|minor|major|<x.y.z>
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -18,54 +18,52 @@ const bump = (version, kind) => {
   throw new Error(`Unknown version argument "${kind}". Use patch, minor, major or an explicit x.y.z.`)
 }
 
-const run = (command, args, options = {}) =>
-  execFileSync(command, args, { cwd: root, stdio: 'inherit', ...options })
-
+const run = (command, args) => execFileSync(command, args, { cwd: root, stdio: 'inherit' })
 const git = (args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim()
 
 const argument = process.argv[2] ?? 'patch'
-const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
-const next = bump(pkg.version, argument)
+const originalText = readFileSync(pkgPath, 'utf8')
+const pkg = JSON.parse(originalText)
+const previous = pkg.version
+const next = bump(previous, argument)
 const tag = `v${next}`
 
+const abort = (message, code = 1) => {
+  writeFileSync(pkgPath, originalText)
+  console.error(message)
+  process.exit(code)
+}
+
 if (git(['status', '--porcelain']) !== '') {
-  console.error('Working tree is dirty. Commit or stash first so the release tag matches the build.')
-  process.exit(1)
+  abort('Working tree is dirty. Commit or stash first so the release tag matches the build.')
 }
-if (git(['tag', '--list', tag]) !== '') {
-  console.error(`Tag ${tag} already exists.`)
-  process.exit(1)
+if (git(['tag', '--list', tag]) !== '') abort(`Tag ${tag} already exists.`)
+if (git(['branch', '--show-current']) !== 'master') abort('Release from master.')
+
+console.log(`Releasing ${previous} → ${next}`)
+writeFileSync(pkgPath, `${JSON.stringify({ ...pkg, version: next }, null, 2)}\n`)
+try {
+  run('node', ['scripts/fetch-ytdlp.mjs'])
+  run('npm', ['run', 'dist'])
+} catch (err) {
+  abort(`Build failed: ${err instanceof Error ? err.message : String(err)}`)
 }
-
-console.log(`Releasing ${pkg.version} → ${next}`)
-pkg.version = next
-writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`)
-
-run('node', ['scripts/fetch-ytdlp.mjs'])
-run('npm', ['run', 'dist'])
 
 const appImage = join(root, 'release', `BusyTool-${next}.AppImage`)
 const manifest = join(root, 'release', 'latest-linux.yml')
 for (const file of [appImage, manifest]) {
-  if (!existsSync(file)) {
-    console.error(`Build did not produce ${file}`)
-    process.exit(1)
-  }
+  if (!existsSync(file)) abort(`Build did not produce ${file}`)
+}
+const manifestText = readFileSync(manifest, 'utf8')
+if (!new RegExp(`^version:\\s*${next.replace(/\./g, '\\.')}$`, 'm').test(manifestText)) {
+  abort(`${manifest} does not describe ${next}.`)
 }
 
+// Verified build: commit the version bump, tag it, and publish.
 run('git', ['add', 'package.json'])
 run('git', ['commit', '-m', `${tag}: release`])
 run('git', ['tag', '-a', tag, '-m', `BusyTool ${next}`])
 run('git', ['push', 'origin', 'HEAD', '--follow-tags'])
-run('gh', [
-  'release',
-  'create',
-  tag,
-  appImage,
-  manifest,
-  '--title',
-  `BusyTool ${next}`,
-  '--generate-notes'
-])
+run('gh', ['release', 'create', tag, appImage, manifest, '--title', `BusyTool ${next}`, '--generate-notes'])
 
 console.log(`\nReleased ${tag}. Installed copies will offer it in Settings → Updates.`)
