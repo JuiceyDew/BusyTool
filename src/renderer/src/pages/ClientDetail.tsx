@@ -88,6 +88,7 @@ export function ClientDetailPage() {
     company: client.company,
     email: client.email,
     phone: client.phone,
+    billingAddress: client.billingAddress,
     notes: client.notes
   }
 

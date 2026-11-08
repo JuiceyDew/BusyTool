@@ -1,7 +1,15 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { tx } from '../db'
 import { addDaysISO, nowTimestamp, todayISO } from '../../shared/date'
-import type { InvoiceDetail, InvoiceItem, InvoiceRow, InvoiceStatus, ProjectRow, VideoRow } from '../../shared/types'
+import type {
+  BillingParty,
+  InvoiceDetail,
+  InvoiceItem,
+  InvoiceRow,
+  InvoiceStatus,
+  ProjectRow,
+  VideoRow
+} from '../../shared/types'
 import { nullableNum, nullableStr, num, oneOf, str, type Row } from '../rows'
 import { getProject } from './projects'
 import { getVideo } from './videos'
@@ -9,6 +17,8 @@ import { getVideo } from './videos'
 export interface ExtraItemInput {
   description: string
   amountCents: number
+  /** Defaults to 1. Quantity x unit price must equal amountCents when both are given. */
+  quantity?: number
 }
 
 export interface CreateInvoiceInput {
@@ -86,7 +96,8 @@ function readItems(db: DatabaseSync, invoiceId: number): InvoiceItem[] {
   return db
     .prepare(
       `SELECT id, invoice_id AS invoiceId, description, amount_cents AS amountCents,
-              project_id AS projectId, video_id AS videoId, sort
+              project_id AS projectId, video_id AS videoId,
+              quantity, unit_price_cents AS unitPriceCents, sort
        FROM invoice_items WHERE invoice_id = ? ORDER BY sort ASC, id ASC`
     )
     .all(invoiceId)
@@ -101,6 +112,8 @@ function readItems(db: DatabaseSync, invoiceId: number): InvoiceItem[] {
         projectId,
         videoId,
         kind: projectId !== null ? 'project' : videoId !== null ? 'video' : 'line',
+        quantity: num(row.quantity),
+        unitPriceCents: num(row.unitPriceCents),
         sort: num(row.sort)
       }
     })
@@ -131,7 +144,25 @@ export function getInvoice(db: DatabaseSync, id: number): InvoiceDetail | null {
     invoice: mapInvoice(row),
     items: readItems(db, id),
     projects: linkedProjects(db, id),
-    videos: linkedVideos(db, id)
+    videos: linkedVideos(db, id),
+    billTo: billToFor(db, num(row.clientId))
+  }
+}
+
+/** Billing details for the invoice's "Bill to" block, read from the client record. */
+function billToFor(db: DatabaseSync, clientId: number): BillingParty {
+  const row = db
+    .prepare(
+      `SELECT name, company, email, phone, billing_address AS billingAddress FROM clients WHERE id = ?`
+    )
+    .get(clientId)
+  if (!row) return { name: '', company: '', email: '', phone: '', address: '' }
+  return {
+    name: str(row.name),
+    company: str(row.company),
+    email: str(row.email),
+    phone: str(row.phone),
+    address: str(row.billingAddress)
   }
 }
 
@@ -230,18 +261,40 @@ export function createInvoice(
 
     // Items are snapshots of the price at billing time; the CHECK keeps one source per line.
     const insertItem = db.prepare(
-      `INSERT INTO invoice_items(invoice_id, description, amount_cents, project_id, video_id, sort)
-       VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT INTO invoice_items(invoice_id, description, amount_cents, project_id, video_id,
+         quantity, unit_price_cents, sort)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
     let sort = 0
     for (const project of projects) {
-      insertItem.run(invoiceId, project.title, project.amountCents, project.id, null, sort++)
+      insertItem.run(invoiceId, project.title, project.amountCents, project.id, null, 1, project.amountCents, sort++)
     }
     for (const video of videos) {
-      insertItem.run(invoiceId, videoItemDescription(video), video.priceCents, null, video.id, sort++)
+      insertItem.run(
+        invoiceId,
+        videoItemDescription(video),
+        video.priceCents,
+        null,
+        video.id,
+        1,
+        video.priceCents,
+        sort++
+      )
     }
     for (const extra of extraItems) {
-      insertItem.run(invoiceId, extra.description.trim(), extra.amountCents, null, null, sort++)
+      const quantity = extra.quantity ?? 1
+      // The line total is authoritative; the unit price is only shown when a quantity is used.
+      const unitPrice = quantity === 1 ? extra.amountCents : Math.round(extra.amountCents / quantity)
+      insertItem.run(
+        invoiceId,
+        extra.description.trim(),
+        extra.amountCents,
+        null,
+        null,
+        quantity,
+        unitPrice,
+        sort++
+      )
     }
 
     const linkProject = db.prepare('UPDATE projects SET invoice_id = ? WHERE id = ?')

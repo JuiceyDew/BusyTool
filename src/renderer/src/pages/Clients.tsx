@@ -121,7 +121,14 @@ export function ClientsPage() {
   )
 }
 
-const EMPTY_FORM: ClientPayload = { name: '', company: '', email: '', phone: '', notes: '' }
+const EMPTY_FORM: ClientPayload = {
+  name: '',
+  company: '',
+  email: '',
+  phone: '',
+  billingAddress: '',
+  notes: ''
+}
 
 export function ClientModal({
   open,
@@ -207,6 +214,16 @@ export function ClientModal({
           <Input
             value={form.phone ?? ''}
             onChange={(event) => field({ ...form, phone: event.target.value })}
+          />
+        </Field>
+        <Field
+          label="Billing address"
+          hint="Printed on invoices. Use the name and address their accounts-payable team has on file."
+        >
+          <Textarea
+            className="min-h-16"
+            value={form.billingAddress ?? ''}
+            onChange={(event) => field({ ...form, billingAddress: event.target.value })}
           />
         </Field>
         <Field label="Notes">

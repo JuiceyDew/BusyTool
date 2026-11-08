@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { call } from '../lib/api'
+import { InvoiceDocument } from '../components/InvoiceDocument'
 import { useAsync } from '../lib/useAsync'
 import { formatDate } from '@shared/date'
-import { formatCents } from '@shared/money'
 import { Badge, Card, CardHeader } from '../components/ui/Card'
 import { Field, Input, Textarea } from '../components/ui/Input'
 import { Modal } from '../components/ui/Modal'
@@ -35,9 +35,6 @@ export function InvoiceDetailPage() {
     ])
     return { detail: detail as InvoiceDetail | null, settings: settings as Settings }
   }, [invoiceId])
-
-  const currency = state.data?.settings.currency ?? 'USD'
-  const money = (cents: number): string => formatCents(cents, currency)
 
   const setStatus = async (status: InvoiceStatus | 'unpaid'): Promise<void> => {
     setPending(status)
@@ -76,7 +73,6 @@ export function InvoiceDetailPage() {
   if (!state.data.detail) return <p className="text-sm text-zinc-500">Invoice not found.</p>
 
   const { invoice, items, projects, videos } = state.data.detail
-  const total = items.reduce((sum, item) => sum + item.amountCents, 0)
 
   return (
     <div>
@@ -121,45 +117,13 @@ export function InvoiceDetailPage() {
       />
 
       <div className="grid gap-4 lg:grid-cols-[1fr_300px]">
-        <Card>
+        <Card className="overflow-hidden">
           <CardHeader
-            title="Line items"
-            subtitle={`${items.length} line${items.length === 1 ? '' : 's'} · snapshot of what was billed`}
+            title="Invoice"
+            subtitle="Exactly what the client receives — this is the PDF."
             actions={<Badge tone={tone(invoice.status)}>{invoice.status}</Badge>}
           />
-          <Table>
-            <thead>
-              <tr>
-                <Th>Description</Th>
-                <Th>Kind</Th>
-                <Th className="text-right">Amount</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item) => (
-                <Tr key={item.id}>
-                  <Td>{item.description}</Td>
-                  <Td>
-                    <Badge tone={item.kind === 'project' ? 'blue' : item.kind === 'video' ? 'zinc' : 'zinc'}>
-                      {item.kind}
-                    </Badge>
-                  </Td>
-                  <Td className="text-right tabular-nums">{money(item.amountCents)}</Td>
-                </Tr>
-              ))}
-              <tr>
-                <Td className="font-medium">Total</Td>
-                <Td />
-                <Td className="text-right font-semibold tabular-nums">{money(total)}</Td>
-              </tr>
-            </tbody>
-          </Table>
-          {invoice.notes ? (
-            <div className="border-t border-zinc-100 px-4 py-3">
-              <p className="text-xs font-medium text-zinc-500">Notes</p>
-              <p className="mt-1 whitespace-pre-wrap text-sm text-zinc-700">{invoice.notes}</p>
-            </div>
-          ) : null}
+          <InvoiceDocument detail={state.data.detail} settings={state.data.settings} className="p-6" />
         </Card>
 
         <div className="space-y-4">
@@ -182,34 +146,18 @@ export function InvoiceDetailPage() {
           </Card>
 
           <Card className="p-4">
-            <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Bill to</p>
-            <p className="mt-2 text-sm font-medium">{invoice.clientName}</p>
-            {projects.length > 0 || videos.length > 0 ? (
-              <p className="mt-1 text-xs text-zinc-500">
-                {[
-                  projects.length > 0
-                    ? `${projects.length} project${projects.length === 1 ? '' : 's'}`
-                    : null,
-                  videos.length > 0 ? `${videos.length} video${videos.length === 1 ? '' : 's'}` : null
-                ]
-                  .filter(Boolean)
-                  .join(' · ')}{' '}
-                on this invoice
-              </p>
-            ) : null}
-          </Card>
-
-          <Card className="p-4">
-            <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">From</p>
-            <p className="mt-2 text-sm font-medium">{state.data.settings.businessName || 'Your business'}</p>
-            {state.data.settings.businessEmail ? (
-              <p className="text-xs text-zinc-500">{state.data.settings.businessEmail}</p>
-            ) : null}
-            {state.data.settings.businessAddress ? (
-              <p className="mt-1 whitespace-pre-wrap text-xs text-zinc-500">
-                {state.data.settings.businessAddress}
-              </p>
-            ) : null}
+            <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Line items</p>
+            <p className="mt-2 text-sm">
+              {items.length} line{items.length === 1 ? '' : 's'}
+              {projects.length > 0 ? ` · ${projects.length} project${projects.length === 1 ? '' : 's'}` : ''}
+              {videos.length > 0 ? ` · ${videos.length} video${videos.length === 1 ? '' : 's'}` : ''}
+            </p>
+            <p className="mt-2 text-xs text-zinc-500">
+              Amounts are a snapshot taken when the invoice was created.
+            </p>
+            <Link to={`/invoices/${invoice.id}/print`} className="mt-3 inline-block text-xs text-zinc-500 hover:text-zinc-900">
+              Open print view
+            </Link>
           </Card>
         </div>
       </div>

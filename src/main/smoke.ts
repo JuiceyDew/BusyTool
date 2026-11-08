@@ -9,7 +9,7 @@ import { createVideoType } from './repo/videoTypes'
 import { createExpense } from './repo/expenses'
 import { createInvoice, setInvoiceStatus } from './repo/invoices'
 import { dashboardSummary, unpaidQueue } from './repo/dashboard'
-import { updateSettings } from './repo/settings'
+import { getSettings, updateSettings } from './repo/settings'
 import { formatCents } from '../shared/money'
 
 interface SmokeContext {
@@ -31,7 +31,9 @@ function seed(db: DatabaseSync): void {
   const client = createClient(db, {
     name: 'Acme Studio',
     company: 'Acme Media',
-    email: 'hello@acme.test'
+    email: 'ap@acme.test',
+    phone: '+1 (555) 010-4455',
+    billingAddress: '500 Market Street, Suite 12\nSan Francisco, CA 94105'
   })
 
   const paidProject = createProject(db, {
@@ -85,12 +87,18 @@ function seed(db: DatabaseSync): void {
   createExpense(db, { date: '2026-10-20', label: 'Music licence', amountCents: 20000 })
 
   updateSettings(db, {
+    ...getSettings(db),
     currency: 'USD',
     businessName: 'Acme Studio',
     businessEmail: 'billing@acme.test',
-    businessAddress: '1 Main Street\nSpringfield',
+    businessAddress: '1 Main Street\nSpringfield, IL 62701',
     invoicePrefix: 'INV',
-    paymentTermsDays: 14
+    paymentTermsDays: 14,
+    businessPhone: '+1 (555) 010-2030',
+    businessWebsite: 'acmestudio.test',
+    businessTaxId: 'EIN 12-3456789',
+    paymentInstructions: 'Bank transfer — Chase\nAcme Studio LLC\nRouting 021000021 · Account 1234567890',
+    invoiceFooter: 'Thank you for your business. Questions? billing@acme.test'
   })
 }
 

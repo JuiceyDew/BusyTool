@@ -103,7 +103,7 @@ describe('openDatabase', () => {
     legacy.close()
 
     const db = openDatabase(file)
-    expect(readUserVersion(db)).toBe(2)
+    expect(readUserVersion(db)).toBe(SCHEMA_VERSION)
     expect(db.prepare('SELECT title, price_cents, paid_at, invoice_id FROM videos WHERE id = 1').get()).toEqual({
       title: 'Legacy video',
       price_cents: 15000,

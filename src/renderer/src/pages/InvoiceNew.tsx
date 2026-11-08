@@ -14,6 +14,8 @@ import type { ClientRow, ProjectRow, Settings, VideoRow } from '@shared/types'
 interface ExtraItem {
   description: string
   amount: string
+  /** Blank means 1: the line is a single flat amount. */
+  quantity: string
 }
 
 export function InvoiceNewPage() {
@@ -113,10 +115,14 @@ export function InvoiceNewPage() {
     }
     const extraItems = extras
       .filter((extra) => extra.description.trim())
-      .map((extra) => ({
-        description: extra.description.trim(),
-        amountCents: parseAmountToCents(extra.amount) ?? 0
-      }))
+      .map((extra) => {
+        const quantity = extra.quantity.trim() === '' ? 1 : Number(extra.quantity)
+        return {
+          description: extra.description.trim(),
+          amountCents: parseAmountToCents(extra.amount) ?? 0,
+          quantity: Number.isFinite(quantity) && quantity > 0 ? quantity : 1
+        }
+      })
     setPending(true)
     setError(null)
     try {
@@ -254,7 +260,9 @@ export function InvoiceNewPage() {
               <Button
                 size="sm"
                 variant="ghost"
-                onClick={() => setExtras((current) => [...current, { description: '', amount: '' }])}
+                onClick={() =>
+                  setExtras((current) => [...current, { description: '', amount: '', quantity: '1' }])
+                }
               >
                 Add line
               </Button>
@@ -279,9 +287,22 @@ export function InvoiceNewPage() {
                       }
                     />
                     <Input
+                      className="w-20"
+                      placeholder="1"
+                      inputMode="decimal"
+                      aria-label="Quantity"
+                      value={extra.quantity}
+                      onChange={(event) =>
+                        setExtras((current) =>
+                          current.map((row, i) => (i === index ? { ...row, quantity: event.target.value } : row))
+                        )
+                      }
+                    />
+                    <Input
                       className="w-32"
                       placeholder="0.00"
                       inputMode="decimal"
+                      aria-label="Amount"
                       value={extra.amount}
                       onChange={(event) =>
                         setExtras((current) =>

@@ -118,7 +118,8 @@ export function listVideos(
   }
   const sql = `SELECT ${COLUMNS} ${FROM}
     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-    ORDER BY v.paid_at IS NOT NULL ASC, v.created_at DESC, v.id DESC`
+    ORDER BY v.paid_at IS NOT NULL ASC, v.published_at IS NOT NULL ASC, v.published_at DESC,
+      v.created_at DESC, v.id DESC`
   return db.prepare(sql).all(...params).map((row) => mapVideo(db, row))
 }
 

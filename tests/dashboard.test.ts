@@ -134,6 +134,7 @@ describe('settings repo', () => {
     expect(getSettings(db)).toMatchObject({ currency: 'USD', invoicePrefix: 'INV', paymentTermsDays: 14 })
 
     const saved = updateSettings(db, {
+      ...getSettings(db),
       currency: 'EUR',
       businessName: 'Acme Studio',
       businessEmail: 'hi@acme.test',

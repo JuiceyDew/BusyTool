@@ -12,6 +12,34 @@ export interface Settings {
   businessAddress: string
   invoicePrefix: string
   paymentTermsDays: number
+  businessPhone: string
+  businessWebsite: string
+  businessTaxId: string
+  /** Free text printed under "How to pay" — bank details, a payment link, whatever you use. */
+  paymentInstructions: string
+  invoiceFooter: string
+  /** CSS colour used for the invoice rule, headings and total. */
+  accentColor: string
+  /** Data URL of the uploaded logo, or '' when none is set. */
+  logoData: string
+  showLogo: boolean
+  showPhone: boolean
+  showWebsite: boolean
+  showTaxId: boolean
+  showPaymentInstructions: boolean
+  showTerms: boolean
+  showNotes: boolean
+  showFooter: boolean
+  showQuantity: boolean
+}
+
+/** What a client's accounts-payable team needs: company name, address, contact. */
+export interface BillingParty {
+  name: string
+  company: string
+  email: string
+  phone: string
+  address: string
 }
 
 export interface ClientRow {
@@ -20,6 +48,7 @@ export interface ClientRow {
   company: string
   email: string
   phone: string
+  billingAddress: string
   notes: string
   archived: 0 | 1
   createdAt: string
@@ -101,6 +130,8 @@ export interface InvoiceItem {
   projectId: number | null
   videoId: number | null
   kind: 'project' | 'video' | 'line'
+  quantity: number
+  unitPriceCents: number
   sort: number
 }
 
@@ -127,6 +158,8 @@ export interface InvoiceDetail {
   items: InvoiceItem[]
   projects: ProjectRow[]
   videos: VideoRow[]
+  /** Snapshot of the client's billing details at render time. */
+  billTo: BillingParty
 }
 
 export interface ExpenseRow {

@@ -81,6 +81,25 @@ Rules, enforced in one place (`src/main/repo/money-queries.ts`):
 
 Amounts are integer cents in one currency (Settings, default USD).
 
+## Designing the invoice
+
+**Settings → Invoice design** controls what the client sees, and the preview beside it is the
+exact PDF layout (one component, `InvoiceDocument`, renders both). Per invoice you can turn on or
+off:
+
+| Section | Why it matters |
+|---|---|
+| How to pay | Bank details or a payment link. The most useful block on the page. |
+| Due date and terms | A printed calendar date plus Net N — a date is a deadline, "Net 30" is arithmetic. |
+| Phone, website, tax ID | Accounts-payable matching: a missing address or tax ID gets invoices bounced. |
+| Logo | Uploaded PNG/SVG, stored in the database so backups keep it. |
+| Quantity and rate | Adds columns, but only when some line actually has a quantity other than 1. |
+| Notes, footer | The per-invoice note and a closing line. |
+
+Accent colour tints the rule, the due date and the total. The client's **Billing address**
+(Clients → Edit) is printed under "Bill to" — use the name and address their accounts-payable
+team has on file, not your day-to-day contact.
+
 ## Data and backups
 
 Everything lives in `~/.config/BusyTool/busytool.db`. Close the app, then copy that file (and the

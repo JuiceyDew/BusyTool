@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import type { DatabaseSync } from 'node:sqlite'
 import { CHANNELS, type Channel, type IpcMap } from '../shared/ipc'
 import { SCHEMAS } from '../shared/schemas'
@@ -146,6 +146,26 @@ const handlers: { [K in Channel]: Handler<K> } = {
     return null
   },
   'app:dataPath': () => dataFilePath,
+
+  'app:pickLogo': async (_req, { win }) => {
+    const picked = await dialog.showOpenDialog(win ?? undefined as unknown as BrowserWindow, {
+      title: 'Choose a logo',
+      properties: ['openFile'],
+      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'svg'] }]
+    })
+    const file = picked.filePaths[0]
+    if (picked.canceled || !file) return { canceled: true }
+    const { readFile } = await import('node:fs/promises')
+    const { extname, basename } = await import('node:path')
+    const data = await readFile(file)
+    if (data.byteLength > 1_500_000) {
+      throw new Error('That image is larger than 1.5 MB. Use a smaller logo.')
+    }
+    const ext = extname(file).slice(1).toLowerCase()
+    const mime =
+      ext === 'svg' ? 'image/svg+xml' : ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg'
+    return { canceled: false, dataUrl: `data:${mime};base64,${data.toString('base64')}`, name: basename(file) }
+  },
 
   'app:updateCheck': async () => {
     const result = await checkForUpdate()

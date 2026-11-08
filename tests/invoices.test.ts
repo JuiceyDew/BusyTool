@@ -404,6 +404,44 @@ describe('invoice video billing', () => {
     db.close()
   })
 
+  it('carries the client billing details for the "Bill to" block', () => {
+    const { db, client, project } = videoSetup()
+    db.prepare('UPDATE clients SET billing_address = ?, company = ?, email = ? WHERE id = ?').run(
+      '500 Market St\nSan Francisco, CA 94105',
+      'Acme Media',
+      'ap@acme.test',
+      client.id
+    )
+    const real = createInvoice(db, { clientId: client.id, projectIds: [project.id] })
+    expect(real.billTo).toEqual({
+      name: 'Acme Studio',
+      company: 'Acme Media',
+      email: 'ap@acme.test',
+      phone: '',
+      address: '500 Market St\nSan Francisco, CA 94105'
+    })
+    expect(getInvoice(db, real.invoice.id)?.billTo.name).toBe('Acme Studio')
+    db.close()
+  })
+
+  it('stores quantity and unit price on line items', () => {
+    const { db, client, project } = videoSetup()
+    const invoice = createInvoice(
+      db,
+      {
+        clientId: client.id,
+        projectIds: [project.id],
+        extraItems: [{ description: 'Extra revisions', amountCents: 30000, quantity: 3 }]
+      },
+      { today: '2026-05-01' }
+    )
+    expect(invoice.items.map((item) => [item.description, item.quantity, item.unitPriceCents, item.amountCents])).toEqual([
+      ['Spring campaign', 1, 65000, 65000],
+      ['Extra revisions', 3, 10000, 30000]
+    ])
+    db.close()
+  })
+
   it('names a title-less video by its id on the line item', () => {
     const db = openDatabase(':memory:')
     const client = createClient(db, { name: 'Acme Studio' })

@@ -19,6 +19,7 @@ const clientPayload = z.object({
   company: optionalText,
   email: optionalText,
   phone: optionalText,
+  billingAddress: optionalText,
   notes: optionalText
 })
 
@@ -65,12 +66,15 @@ const invoiceCreate = z.object({
     .array(
       z.object({
         description: z.string().trim().min(1, 'Description is required').max(200),
-        amountCents: signedMoney
+        amountCents: signedMoney,
+        quantity: z.number().positive().max(10_000).optional()
       })
     )
     .max(100)
     .optional()
 })
+
+const hexColor = z.string().regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, 'Use a hex colour like #18181b')
 
 const settingsPayload = z.object({
   currency: z.string().regex(/^[A-Z]{3}$/, 'Use a 3-letter currency code'),
@@ -78,7 +82,27 @@ const settingsPayload = z.object({
   businessEmail: z.string().max(200),
   businessAddress: z.string().max(1_000),
   invoicePrefix: z.string().max(20),
-  paymentTermsDays: z.number().int().min(0).max(365)
+  paymentTermsDays: z.number().int().min(0).max(365),
+  businessPhone: z.string().max(100),
+  businessWebsite: z.string().max(300),
+  businessTaxId: z.string().max(100),
+  paymentInstructions: z.string().max(4_000),
+  invoiceFooter: z.string().max(1_000),
+  accentColor: hexColor,
+  // A 512px PNG logo is well under this; the cap only stops something absurd being stored.
+  logoData: z
+    .string()
+    .max(2_000_000)
+    .refine((value) => value === '' || value.startsWith('data:image/'), 'Logo must be an uploaded image'),
+  showLogo: z.boolean(),
+  showPhone: z.boolean(),
+  showWebsite: z.boolean(),
+  showTaxId: z.boolean(),
+  showPaymentInstructions: z.boolean(),
+  showTerms: z.boolean(),
+  showNotes: z.boolean(),
+  showFooter: z.boolean(),
+  showQuantity: z.boolean()
 })
 
 const empty = z.object({}).loose()
@@ -146,6 +170,7 @@ export const SCHEMAS: Record<Channel, z.ZodType> = {
 
   'app:openExternal': z.object({ url: z.string().url().refine((u) => u.startsWith('https://'), 'Only https links can be opened') }),
   'app:dataPath': empty,
+  'app:pickLogo': empty,
   'app:updateCheck': empty,
   'app:updateInstall': empty,
   'app:updateInfo': empty

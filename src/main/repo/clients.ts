@@ -15,6 +15,7 @@ export interface ClientInput {
   company?: string
   email?: string
   phone?: string
+  billingAddress?: string
   notes?: string
 }
 
@@ -25,13 +26,14 @@ function mapClient(row: Row): ClientRow {
     company: str(row.company),
     email: str(row.email),
     phone: str(row.phone),
+    billingAddress: str(row.billingAddress),
     notes: str(row.notes),
     archived: boolInt(row.archived),
     createdAt: str(row.createdAt)
   }
 }
 
-const CLIENT_COLUMNS = `id, name, company, email, phone, notes, archived, created_at AS createdAt`
+const CLIENT_COLUMNS = `id, name, company, email, phone, billing_address AS billingAddress, notes, archived, created_at AS createdAt`
 
 export function listClients(
   db: DatabaseSync,
@@ -84,13 +86,15 @@ export function getClient(db: DatabaseSync, id: number): ClientDetail | null {
 export function createClient(db: DatabaseSync, input: ClientInput): ClientRow {
   const result = db
     .prepare(
-      `INSERT INTO clients(name, company, email, phone, notes, created_at) VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT INTO clients(name, company, email, phone, billing_address, notes, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       input.name.trim(),
       input.company?.trim() ?? '',
       input.email?.trim() ?? '',
       input.phone?.trim() ?? '',
+      input.billingAddress?.trim() ?? '',
       input.notes ?? '',
       nowTimestamp()
     )
@@ -100,11 +104,15 @@ export function createClient(db: DatabaseSync, input: ClientInput): ClientRow {
 }
 
 export function updateClient(db: DatabaseSync, id: number, input: ClientInput): ClientRow {
-  db.prepare(`UPDATE clients SET name = ?, company = ?, email = ?, phone = ?, notes = ? WHERE id = ?`).run(
+  db.prepare(
+    `UPDATE clients SET name = ?, company = ?, email = ?, phone = ?, billing_address = ?, notes = ?
+     WHERE id = ?`
+  ).run(
     input.name.trim(),
     input.company?.trim() ?? '',
     input.email?.trim() ?? '',
     input.phone?.trim() ?? '',
+    input.billingAddress?.trim() ?? '',
     input.notes ?? '',
     id
   )

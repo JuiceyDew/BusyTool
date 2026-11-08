@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 
-export const SCHEMA_VERSION = 2
+export const SCHEMA_VERSION = 3
 
 const DDL = `
 CREATE TABLE settings (
@@ -10,11 +10,28 @@ CREATE TABLE settings (
   business_email TEXT NOT NULL DEFAULT '',
   business_address TEXT NOT NULL DEFAULT '',
   invoice_prefix TEXT NOT NULL DEFAULT 'INV',
-  payment_terms_days INTEGER NOT NULL DEFAULT 14
+  payment_terms_days INTEGER NOT NULL DEFAULT 14,
+  business_phone TEXT NOT NULL DEFAULT '',
+  business_website TEXT NOT NULL DEFAULT '',
+  business_tax_id TEXT NOT NULL DEFAULT '',
+  payment_instructions TEXT NOT NULL DEFAULT '',
+  invoice_footer TEXT NOT NULL DEFAULT '',
+  accent_color TEXT NOT NULL DEFAULT '#18181b',
+  logo_data TEXT NOT NULL DEFAULT '',
+  show_logo INTEGER NOT NULL DEFAULT 1,
+  show_phone INTEGER NOT NULL DEFAULT 1,
+  show_website INTEGER NOT NULL DEFAULT 1,
+  show_tax_id INTEGER NOT NULL DEFAULT 1,
+  show_payment_instructions INTEGER NOT NULL DEFAULT 1,
+  show_terms INTEGER NOT NULL DEFAULT 1,
+  show_notes INTEGER NOT NULL DEFAULT 1,
+  show_footer INTEGER NOT NULL DEFAULT 1,
+  show_quantity INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE clients (
   id INTEGER PRIMARY KEY, name TEXT NOT NULL, company TEXT NOT NULL DEFAULT '',
   email TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '',
+  billing_address TEXT NOT NULL DEFAULT '',
   notes TEXT NOT NULL DEFAULT '', archived INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL
 );
@@ -66,6 +83,8 @@ CREATE TABLE invoice_items (
   description TEXT NOT NULL, amount_cents INTEGER NOT NULL,
   project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
   video_id INTEGER REFERENCES videos(id) ON DELETE SET NULL,
+  quantity REAL NOT NULL DEFAULT 1,
+  unit_price_cents INTEGER NOT NULL DEFAULT 0,
   sort INTEGER NOT NULL DEFAULT 0,
   CHECK (project_id IS NULL OR video_id IS NULL)
 );
@@ -101,6 +120,35 @@ ALTER TABLE invoice_items ADD COLUMN video_id INTEGER REFERENCES videos(id) ON D
 CREATE INDEX idx_videos_invoice ON videos(invoice_id);
 `
 
+/**
+ * v3: invoices gain the fields a client's accounts-payable department actually needs (buyer
+ * billing address, payment instructions, tax ID, contact details) plus presentation controls:
+ * an accent colour, an optional logo stored in-row, quantity/unit price on line items, and
+ * per-section visibility flags so the same invoice can be trimmed to taste.
+ */
+const MIGRATION_V3 = `
+ALTER TABLE settings ADD COLUMN business_phone TEXT NOT NULL DEFAULT '';
+ALTER TABLE settings ADD COLUMN business_website TEXT NOT NULL DEFAULT '';
+ALTER TABLE settings ADD COLUMN business_tax_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE settings ADD COLUMN payment_instructions TEXT NOT NULL DEFAULT '';
+ALTER TABLE settings ADD COLUMN invoice_footer TEXT NOT NULL DEFAULT '';
+ALTER TABLE settings ADD COLUMN accent_color TEXT NOT NULL DEFAULT '#18181b';
+ALTER TABLE settings ADD COLUMN logo_data TEXT NOT NULL DEFAULT '';
+ALTER TABLE settings ADD COLUMN show_logo INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE settings ADD COLUMN show_phone INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE settings ADD COLUMN show_website INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE settings ADD COLUMN show_tax_id INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE settings ADD COLUMN show_payment_instructions INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE settings ADD COLUMN show_terms INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE settings ADD COLUMN show_notes INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE settings ADD COLUMN show_footer INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE settings ADD COLUMN show_quantity INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE clients ADD COLUMN billing_address TEXT NOT NULL DEFAULT '';
+ALTER TABLE invoice_items ADD COLUMN quantity REAL NOT NULL DEFAULT 1;
+ALTER TABLE invoice_items ADD COLUMN unit_price_cents INTEGER NOT NULL DEFAULT 0;
+UPDATE invoice_items SET unit_price_cents = amount_cents;
+`
+
 export function readUserVersion(db: DatabaseSync): number {
   const row = db.prepare('PRAGMA user_version').get()
   if (!row) return 0
@@ -121,6 +169,7 @@ export function migrate(db: DatabaseSync): void {
       db.exec('INSERT OR IGNORE INTO settings(id) VALUES (1)')
     }
     if (version >= 1 && version < 2) db.exec(MIGRATION_V2)
+    if (version >= 1 && version < 3) db.exec(MIGRATION_V3)
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`)
     db.exec('COMMIT')
   } catch (err) {

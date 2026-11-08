@@ -274,6 +274,7 @@ export function VideosPage() {
                 <Th className="w-8" />
                 <Th>Video</Th>
                 <Th>Client</Th>
+                <Th>Posted</Th>
                 <Th className="text-right">Price</Th>
                 <Th>Payment</Th>
                 <Th>Latest stats</Th>
@@ -310,6 +311,7 @@ export function VideosPage() {
                       </div>
                     </Td>
                     <Td className="text-zinc-500">{video.clientName}</Td>
+                    <Td className="whitespace-nowrap text-zinc-500">{formatDate(video.publishedAt)}</Td>
                     <Td className="text-right tabular-nums">{money(video.priceCents)}</Td>
                     <Td>
                       <Badge tone={paymentTone(video.payment)}>{video.payment}</Badge>

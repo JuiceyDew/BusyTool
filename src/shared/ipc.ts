@@ -22,6 +22,7 @@ export interface ClientPayload {
   company?: string
   email?: string
   phone?: string
+  billingAddress?: string
   notes?: string
 }
 
@@ -64,7 +65,7 @@ export interface InvoiceCreatePayload {
   videoIds?: number[]
   dueDate?: string
   notes?: string
-  extraItems?: Array<{ description: string; amountCents: number }>
+  extraItems?: Array<{ description: string; amountCents: number; quantity?: number }>
 }
 
 export interface UpdateEnvironment {
@@ -153,6 +154,8 @@ export interface IpcMap {
 
   'app:openExternal': { req: { url: string }; res: null }
   'app:dataPath': { req: Record<string, never>; res: string }
+  /** Opens a native file picker and returns a data URL for the chosen image. */
+  'app:pickLogo': { req: Record<string, never>; res: { canceled: boolean; dataUrl?: string } }
   'app:updateCheck': { req: Record<string, never>; res: UpdateCheckResponse }
   'app:updateInstall': { req: Record<string, never>; res: UpdateInstallResponse }
   'app:updateInfo': { req: Record<string, never>; res: UpdateEnvironment }
@@ -202,6 +205,7 @@ export const CHANNELS: Channel[] = [
   'dashboard:unpaidQueue',
   'app:openExternal',
   'app:dataPath',
+  'app:pickLogo',
   'app:updateCheck',
   'app:updateInstall',
   'app:updateInfo'
